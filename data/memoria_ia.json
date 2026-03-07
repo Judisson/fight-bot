@@ -1,0 +1,8 @@
+{
+  "tabela_q": {
+    "luta": 1
+  },
+  "epsilon": 0.049911691230058335,
+  "decaimento_epsilon": 0.995,
+  "epsilon_minimo": 0.05
+}

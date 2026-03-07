@@ -1,0 +1,13 @@
+# Arquitetura de Luta
+
+## Regra principal
+- `Luta` deve ser independente de modo.
+- `treino` e `arena` apenas capturam frame e chamam `luta.processar_frame(frame)`.
+
+## Responsabilidades
+- `src/bot/luta.py`: estado da luta, acao da IA, recompensa, debug.
+- `src/bot/treino.py`: orquestracao do modo treino.
+- `src/bot/arena.py`: orquestracao do modo arena.
+
+## Nao fazer
+- Nao colocar logica de decisao da luta dentro de `treino` ou `arena`.

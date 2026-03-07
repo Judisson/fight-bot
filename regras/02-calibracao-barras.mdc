@@ -1,0 +1,26 @@
+﻿# Calibracao de Barras de Vida
+
+## Local da calibracao
+- Codigo: `src/calibracao/modo_calibracao.py`
+- Config persistida: `data/calibracao_vida.json`
+- Persistencia de config: `src/calibracao/config_vida.py`
+- BBoxes usadas em runtime: `src/visao/barras_vida.py`
+
+## Teclas de ajuste
+- `Q/A`: `y_inicio`
+- `W/S`: `y_fim`
+- `E/D`: `x1_jogador`
+- `R/F`: `x2_jogador`
+- `T/G`: `offset_direita_inimigo`
+- `Y/H`: `largura_inimigo`
+- `P`: salvar
+- `ESC`: sair
+
+## Regra de coordenadas
+- Sempre trabalhar na resolucao do frame capturado (`capturar_tela`).
+- Nunca usar dimensao da janela de debug como referencia de clique.
+
+## Regra de leitura da porcentagem
+- Leitura de vida usa template matching em `assets/porcentagem-vida`.
+- O matcher opera no mesmo recorte calibrado da barra (nao existe recorte paralelo).
+- Faixa atual de templates: `80..100`.

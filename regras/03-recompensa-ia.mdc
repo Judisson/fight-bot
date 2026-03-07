@@ -1,0 +1,11 @@
+# Regras de Recompensa da IA
+
+## Heuristica atual
+- Vida do jogador manteve/aumentou: recompensa positiva.
+- Vida do jogador caiu: penalidade.
+- Vida do inimigo caiu: bonus adicional.
+- KO detectado: penalidade alta e fim do episodio.
+
+## Diretriz
+- Alteracoes de recompensa devem priorizar sobrevivencia e dano eficiente.
+- Evitar recompensas que incentivem spam sem contexto de luta.

@@ -1,0 +1,13 @@
+# Visao Geral do Projeto
+
+## Objetivo
+- Automatizar a jogabilidade de luta com leitura de tela e tomada de decisao em tempo real.
+
+## Modos atuais
+- `arena`: fluxo completo de fila/botoes + luta.
+- `treino`: foco em proficiencia da IA na luta.
+- `calibracao`: ajuste visual de barras de vida.
+
+## Ponto de entrada
+- `python -m src.bot.main`
+- O terminal escolhe FPS e modo com setas.

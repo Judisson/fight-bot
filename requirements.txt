@@ -1,0 +1,13 @@
+﻿gymnasium
+mss
+numpy
+opencv-python
+pydirectinput
+pyautogui
+pygetwindow
+pynput
+pywin32
+stable-baselines3
+tensorboard
+torch
+torchvision

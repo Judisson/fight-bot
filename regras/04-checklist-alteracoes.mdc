@@ -1,0 +1,15 @@
+﻿# Checklist de Alteracoes
+
+## Antes de editar
+- Confirmar se a mudanca pertence a `modo` ou `luta`.
+- Confirmar impacto em `arena`, `treino` e `calibracao`.
+
+## Depois de editar
+- Rodar `python -m compileall src`.
+- Remover `__pycache__` local.
+- Validar imports quebrados.
+- Validar fluxo de menu (`main`), luta e calibracao.
+
+## OCR de vida
+- Verificar se o OCR usa apenas `src/visao/barras_vida.py` como recorte.
+- Bloquear criacao de bbox alternativa para texto de porcentagem.
