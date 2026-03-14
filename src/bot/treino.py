@@ -91,6 +91,7 @@ def iniciar_treino(monitor=None):
   luta = Luta(exibir_debug=exibir_debug)
   capturador = CapturaAssincrona(monitor)
   capturador.iniciar()
+  modo_reinicio = False
 
   try:
     while True:
@@ -101,10 +102,19 @@ def iniciar_treino(monitor=None):
         if frame is None:
           continue
 
-        if processar_layout_treino(frame, monitor, roi_jogar_novamente):
+        if modo_reinicio:
+          if processar_layout_treino(frame, monitor, roi_jogar_novamente):
+            modo_reinicio = False
           continue
 
-        luta.processar_frame(frame)
+        status_luta = luta.processar_frame(frame)
+        if status_luta and status_luta.get("terminal") is not None:
+          modo_reinicio = True
+          if logs_habilitados:
+            log(
+              f"Entrando em modo reinicio apos terminal={status_luta.get('terminal')}. "
+              "YOLO/estado de luta pausados ate detectar jogar novamente."
+            )
       finally:
         controle_fps.finalizar_ciclo(inicio_ciclo)
         metricas = controle_fps.obter_metricas()

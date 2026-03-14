@@ -5,6 +5,7 @@ from pathlib import Path
 
 import cv2
 
+from src.ai.acoes import ACAO_DESTREZA
 from src.ai.cerebro import CerebroIA
 from src.ai.deteccao_luta import obter_estado_luta
 from src.ai.recompensa import PESO_KO, PESO_VITORIA, obter_recompensa
@@ -29,6 +30,7 @@ class Luta:
 
     self._estado_anterior = None
     self._acao_anterior = None
+    self._acao_recompensada_anterior = None
     self._ultima_recompensa = 0.0
 
     try:
@@ -91,18 +93,25 @@ class Luta:
       if self.exibir_debug:
         exibir(self._preparar_frame_debug(frame))
       time.sleep(2)
-      return
+      return {
+        "terminal": terminal,
+        "em_luta": False,
+      }
 
     if not em_luta:
       self.rastreador_personagens.reset()
       self._estado_anterior = None
       self._acao_anterior = None
+      self._acao_recompensada_anterior = None
       self._mensagem_evento_debug = ""
       self._mensagem_evento_debug_restante = 0
       self._frames_dano_recente = 0
       if self.exibir_debug:
         exibir(self._preparar_frame_debug(frame))
-      return
+      return {
+        "terminal": None,
+        "em_luta": False,
+      }
 
     info_vida = obter_info_vida(frame)
     info_personagens = self.rastreador_personagens.detectar(frame)
@@ -118,6 +127,10 @@ class Luta:
 
     info_recompensa = {}
     if self._estado_anterior is not None and self._acao_anterior is not None:
+      destreza_consecutiva = (
+        self._acao_anterior == ACAO_DESTREZA
+        and self._acao_recompensada_anterior == ACAO_DESTREZA
+      )
       recompensa, _, info_recompensa = obter_recompensa(
         frame,
         acao_atual=self._acao_anterior,
@@ -130,7 +143,10 @@ class Luta:
         colunas_escuras_inimigo_finais=info_vida["colunas_escuras_inimigo_finais"],
         nocaute_detectado=False,
         vitoria_detectada=False,
+        destreza_consecutiva=destreza_consecutiva,
+        distancia_px=info_personagens.get("distancia_px") if info_personagens else None,
       )
+      self._acao_recompensada_anterior = self._acao_anterior
       self._ultima_recompensa = recompensa
       self._recompensa_total_episodio += recompensa
       if info_recompensa.get("destreza_perfeita"):
@@ -178,6 +194,11 @@ class Luta:
     self.vida_jogador_anterior = info_vida["vida_jogador_pct"]
     self.vida_inimigo_anterior = info_vida["vida_inimigo_pct"]
 
+    return {
+      "terminal": None,
+      "em_luta": True,
+    }
+
   def _detectar_sinais_estado(self, info_vida):
     vida_jogador = info_vida.get("vida_jogador_pct")
 
@@ -202,11 +223,31 @@ class Luta:
 
   def _atualizar_evento_debug(self, info_recompensa):
     if info_recompensa.get("destreza_perfeita"):
-      self._mensagem_evento_debug = "DESTREZA PERFEITA +3"
+      self._mensagem_evento_debug = "DESTREZA PERFEITA +6"
+      self._mensagem_evento_debug_restante = 20
+      return
+    if info_recompensa.get("destreza_quase"):
+      self._mensagem_evento_debug = "DESTREZA QUASE +2"
+      self._mensagem_evento_debug_restante = 20
+      return
+    if info_recompensa.get("spam_destreza"):
+      self._mensagem_evento_debug = "SPAM DESTREZA -0.5"
+      self._mensagem_evento_debug_restante = 20
+      return
+    if info_recompensa.get("destreza_longe_ruim"):
+      self._mensagem_evento_debug = "DESTREZA LONGE -1.5"
       self._mensagem_evento_debug_restante = 20
       return
     if info_recompensa.get("tomou_dano"):
       self._mensagem_evento_debug = "TOMOU DANO -4"
+      self._mensagem_evento_debug_restante = 20
+      return
+    if info_recompensa.get("nao_reagiu_ataque"):
+      self._mensagem_evento_debug = "SEM REACAO -0.2"
+      self._mensagem_evento_debug_restante = 20
+      return
+    if info_recompensa.get("tentou_reagir_ataque"):
+      self._mensagem_evento_debug = "TENTOU REAGIR +0.5"
       self._mensagem_evento_debug_restante = 20
       return
     if info_recompensa.get("sobreviveu_perigo"):
@@ -252,6 +293,7 @@ class Luta:
     self.vida_inimigo_anterior = None
     self._estado_anterior = None
     self._acao_anterior = None
+    self._acao_recompensada_anterior = None
     self._ultima_recompensa = 0.0
     self._contador_frames = 0
     self._mensagem_evento_debug = ""
