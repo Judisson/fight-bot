@@ -108,29 +108,6 @@ class CerebroIA:
       log("Falha ao salvar memoria da IA.")
 
   @staticmethod
-  def _bucket_vida(valor):
-    if valor is None:
-      return "x"
-    valor = max(0.0, min(100.0, float(valor)))
-    return str(int(valor // 10))
-
-  @staticmethod
-  def _bucket_delta_vida(vida_jogador, vida_inimigo):
-    if vida_jogador is None or vida_inimigo is None:
-      return "x"
-
-    delta = float(vida_jogador) - float(vida_inimigo)
-    if delta <= -30:
-      return "muito_atras"
-    if delta <= -10:
-      return "atras"
-    if delta < 10:
-      return "equilibrado"
-    if delta < 30:
-      return "frente"
-    return "muito_frente"
-
-  @staticmethod
   def _bucket_distancia(distancia_norm):
     if distancia_norm is None:
       return "x"
@@ -147,59 +124,23 @@ class CerebroIA:
       return "x"
     return "1" if bool(valor) else "0"
 
-  @staticmethod
-  def _bucket_nivel_especial(valor):
-    if valor is None:
-      return "x"
-    try:
-      nivel = int(valor)
-    except (TypeError, ValueError):
-      return "x"
-    nivel = max(0, min(3, nivel))
-    return str(nivel)
-
-  @staticmethod
-  def _bucket_postura(postura_tatica):
-    if not postura_tatica:
-      return "x"
-    postura = str(postura_tatica).strip().lower()
-    if postura in {"defensivo", "agressivo"}:
-      return postura
-    return "x"
-
   def obter_estado(self, info_vida=None, info_personagens=None, sinais=None):
-    info_vida = info_vida or {}
     info_personagens = info_personagens or {}
     sinais = sinais or {}
 
-    vida_jogador = info_vida.get("vida_jogador_pct")
-    vida_inimigo = info_vida.get("vida_inimigo_pct")
     distancia_norm = info_personagens.get("distancia_norm")
-    fonte = info_personagens.get("fonte", "x")
-    eu_tenho_especial = sinais.get("eu_tenho_especial")
-    adversario_com_especial = sinais.get("adversario_com_especial")
-    nivel_especial_jogador = sinais.get("nivel_especial_jogador")
-    nivel_especial_inimigo = sinais.get("nivel_especial_inimigo")
-    postura_tatica = sinais.get("postura_tatica")
-    eu_atacando = sinais.get("eu_atacando")
     inimigo_atacando = sinais.get("inimigo_atacando")
-    sem_movimento = sinais.get("sem_movimento")
+    tomou_dano_recente = sinais.get("tomou_dano_recente")
 
+    # ETAPA 1 / FASE 1 (ATIVA): estado reduzido para melhorar revisitacao de
+    # cenarios na Q-table e acelerar aprendizado.
     estado = (
-      f"vj={self._bucket_vida(vida_jogador)}",
-      f"vi={self._bucket_vida(vida_inimigo)}",
-      f"dv={self._bucket_delta_vida(vida_jogador, vida_inimigo)}",
       f"dist={self._bucket_distancia(distancia_norm)}",
-      f"esp_eu={self._bucket_bool(eu_tenho_especial)}",
-      f"esp_adv={self._bucket_bool(adversario_com_especial)}",
-      f"esp_lvl_eu={self._bucket_nivel_especial(nivel_especial_jogador)}",
-      f"esp_lvl_adv={self._bucket_nivel_especial(nivel_especial_inimigo)}",
-      f"postura={self._bucket_postura(postura_tatica)}",
-      f"atk_eu={self._bucket_bool(eu_atacando)}",
       f"atk_adv={self._bucket_bool(inimigo_atacando)}",
-      f"idle={self._bucket_bool(sem_movimento)}",
-      f"fonte={fonte}",
+      f"dano_rec={self._bucket_bool(tomou_dano_recente)}",
     )
+    # FASE 2/3 (PENDENTE): reintroduzir sinais de oportunidade ofensiva
+    # (combo/special) apos estabilizar sobrevivencia na Fase 1.
     return "|".join(estado)
 
   def escolher_acao(self, estado):

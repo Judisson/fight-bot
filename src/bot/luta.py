@@ -1,19 +1,20 @@
-﻿import os
+import json
+import os
 import time
+from pathlib import Path
 
 import cv2
 
-from src.ai.acoes import ACAO_COMBO_SEGURO, ACAO_DEFENSIVO, ACAO_DESTREZA
 from src.ai.cerebro import CerebroIA
 from src.ai.deteccao_luta import obter_estado_luta
 from src.ai.recompensa import PESO_KO, PESO_VITORIA, obter_recompensa
 from src.bot.acoes_luta import executar_acao, obter_acao_em_execucao
-from src.bot.poder import desenhar_info_poder, obter_info_poder
 from src.bot.vida import desenhar_info_vida, obter_info_vida
-from src.bot.visao import encontrar_templates_em_paralelo
 from src.utils.log import log
 from src.utils.visao_debug import exibir
 from src.visao.personagens import RastreadorPersonagens, desenhar_info_personagens
+
+CAMINHO_LOG_TREINO = Path("data/treino_log.jsonl")
 
 
 class Luta:
@@ -28,7 +29,6 @@ class Luta:
 
     self._estado_anterior = None
     self._acao_anterior = None
-    self._adversario_com_especial_anterior = None
     self._ultima_recompensa = 0.0
 
     try:
@@ -39,41 +39,15 @@ class Luta:
       self._debug_downscale = max(1, int(os.getenv("BOT_DEBUG_DOWNSCALE", "2")))
     except ValueError:
       self._debug_downscale = 2
+    try:
+      self._janela_dano_recente = max(1, int(os.getenv("BOT_DANO_RECENTE_FRAMES", "8")))
+    except ValueError:
+      self._janela_dano_recente = 8
 
     self._contador_frames = 0
     self._mensagem_evento_debug = ""
     self._mensagem_evento_debug_restante = 0
-    self._distancia_norm_anterior = None
-    self._frames_ataque_jogador_restante = 0
-    self._frames_sem_movimento = 0
-
-    try:
-      self._duracao_ataque_frames = max(1, int(os.getenv("BOT_ATAQUE_FRAMES", "4")))
-    except ValueError:
-      self._duracao_ataque_frames = 4
-    try:
-      self._janela_sem_movimento = max(1, int(os.getenv("BOT_IDLE_FRAMES", "8")))
-    except ValueError:
-      self._janela_sem_movimento = 8
-    try:
-      self._limiar_movimento_dist = max(0.001, float(os.getenv("BOT_IDLE_DIST_DELTA", "0.015")))
-    except ValueError:
-      self._limiar_movimento_dist = 0.015
-    try:
-      self._limiar_template_especial = float(os.getenv("BOT_LIMIAR_ESPECIAL", "0.8"))
-    except ValueError:
-      self._limiar_template_especial = 0.8
-
-    self._template_especial_jogador = os.getenv(
-      "BOT_TEMPLATE_ESPECIAL_JOGADOR",
-      "assets/especial-jogador.png",
-    ).strip()
-    self._template_especial_inimigo = os.getenv(
-      "BOT_TEMPLATE_ESPECIAL_INIMIGO",
-      "assets/especial-inimigo.png",
-    ).strip()
-    self._tem_template_especial_jogador = os.path.exists(self._template_especial_jogador)
-    self._tem_template_especial_inimigo = os.path.exists(self._template_especial_inimigo)
+    self._frames_dano_recente = 0
 
     self.rastreador_personagens = RastreadorPersonagens(
       usar_yolo=True,
@@ -81,20 +55,26 @@ class Luta:
       somente_yolo=True,
     )
 
+    self._iniciar_metricas_episodio()
+
+    # FASE 2 (PENDENTE): introduzir sinais de janela segura para combo.
+    # FASE 3 (PENDENTE): voltar com postura ofensiva/defensiva e especial.
+    # ETAPA 2 (PENDENTE): trocar Q-table por DQN mantendo este extrator.
+
   def processar_frame(self, frame):
     estado_luta = obter_estado_luta(frame)
     em_luta = estado_luta["em_luta"]
 
+    terminal = None
     terminal_recompensa = None
-    terminal_texto = None
     if estado_luta["nocaute"]:
+      terminal = "ko"
       terminal_recompensa = PESO_KO
-      terminal_texto = "K.O detectado"
     elif estado_luta.get("vitoria"):
+      terminal = "vitoria"
       terminal_recompensa = PESO_VITORIA
-      terminal_texto = "Vitoria detectada"
 
-    if terminal_recompensa is not None:
+    if terminal is not None:
       if self._estado_anterior is not None and self._acao_anterior is not None:
         self.cerebro.aprender(
           self._estado_anterior,
@@ -103,55 +83,31 @@ class Luta:
           proximo_estado=None,
           terminal=True,
         )
-
-      log(terminal_texto)
-      self.estado = "BUSCANDO_LUTA"
+      self._recompensa_total_episodio += terminal_recompensa
       self.episodio += 1
-      self.vida_jogador_anterior = None
-      self.vida_inimigo_anterior = None
-      self._estado_anterior = None
-      self._acao_anterior = None
-      self._adversario_com_especial_anterior = None
-      self._ultima_recompensa = 0.0
-      self._contador_frames = 0
-      self._mensagem_evento_debug = ""
-      self._mensagem_evento_debug_restante = 0
-      self._distancia_norm_anterior = None
-      self._frames_ataque_jogador_restante = 0
-      self._frames_sem_movimento = 0
-      self.rastreador_personagens.reset()
-      log("Episodio finalizado:", self.episodio)
-
+      self._registrar_log_episodio(terminal)
+      log(f"Terminal detectado: {terminal.upper()} | episodio={self.episodio}")
+      self._resetar_contexto_pos_episodio()
       if self.exibir_debug:
         exibir(self._preparar_frame_debug(frame))
-
-      time.sleep(3)
+      time.sleep(2)
       return
 
     if not em_luta:
       self.rastreador_personagens.reset()
       self._estado_anterior = None
       self._acao_anterior = None
-      self._adversario_com_especial_anterior = None
       self._mensagem_evento_debug = ""
       self._mensagem_evento_debug_restante = 0
-      self._distancia_norm_anterior = None
-      self._frames_ataque_jogador_restante = 0
-      self._frames_sem_movimento = 0
-
+      self._frames_dano_recente = 0
       if self.exibir_debug:
         exibir(self._preparar_frame_debug(frame))
       return
 
-    if self._frames_ataque_jogador_restante > 0:
-      self._frames_ataque_jogador_restante -= 1
-
     info_vida = obter_info_vida(frame)
-    info_poder = obter_info_poder(frame)
     info_personagens = self.rastreador_personagens.detectar(frame)
-    sinais_estado = self._detectar_sinais_estado(frame, info_vida, info_poder, info_personagens)
+    sinais_estado = self._detectar_sinais_estado(info_vida)
     estado_atual = self.cerebro.obter_estado(
-      info_vida=info_vida,
       info_personagens=info_personagens,
       sinais=sinais_estado,
     )
@@ -160,26 +116,28 @@ class Luta:
       log("Luta comecou")
       self.estado = "LUTANDO"
 
-    info_recompensa = {
-      "destreza_perfeita": False,
-      "acao_destreza": False,
-    }
-
+    info_recompensa = {}
     if self._estado_anterior is not None and self._acao_anterior is not None:
       recompensa, _, info_recompensa = obter_recompensa(
         frame,
         acao_atual=self._acao_anterior,
-        adversario_com_especial=bool(self._adversario_com_especial_anterior),
+        inimigo_atacando=bool(sinais_estado.get("inimigo_atacando")),
         vida_jogador_atual=info_vida["vida_jogador_pct"],
         vida_jogador_anterior=self.vida_jogador_anterior,
         vida_inimigo_atual=info_vida["vida_inimigo_pct"],
         vida_inimigo_anterior=self.vida_inimigo_anterior,
         colunas_escuras_jogador_finais=info_vida["colunas_escuras_jogador_finais"],
         colunas_escuras_inimigo_finais=info_vida["colunas_escuras_inimigo_finais"],
-        nocaute_detectado=estado_luta["nocaute"],
-        vitoria_detectada=estado_luta.get("vitoria"),
+        nocaute_detectado=False,
+        vitoria_detectada=False,
       )
       self._ultima_recompensa = recompensa
+      self._recompensa_total_episodio += recompensa
+      if info_recompensa.get("destreza_perfeita"):
+        self._destrezas_perfeitas_episodio += 1
+      if info_recompensa.get("tomou_dano"):
+        self._dano_tomado_episodio += float(info_recompensa.get("tomou_dano_delta", 0.0))
+
       self.cerebro.aprender(
         self._estado_anterior,
         self._acao_anterior,
@@ -189,40 +147,23 @@ class Luta:
       )
       self._atualizar_evento_debug(info_recompensa)
 
-    adversario_com_especial = bool(sinais_estado.get("adversario_com_especial"))
-    eu_tenho_especial = bool(sinais_estado.get("eu_tenho_especial"))
     acao = self.cerebro.escolher_acao(estado_atual)
-    if adversario_com_especial:
-      acao = ACAO_DEFENSIVO
-
-    acao_executada = executar_acao(acao, pode_soltar_especial=eu_tenho_especial)
+    acao_executada = executar_acao(acao)
     acao_registrada = acao if acao_executada else obter_acao_em_execucao()
-    if acao_executada and acao_registrada == ACAO_DESTREZA:
-      self._frames_ataque_jogador_restante = self._duracao_ataque_frames
-    elif acao_executada and acao_registrada == ACAO_COMBO_SEGURO:
-      self._frames_ataque_jogador_restante = max(self._duracao_ataque_frames, 12)
-    elif acao_executada and acao_registrada == ACAO_DEFENSIVO:
-      self._frames_ataque_jogador_restante = max(self._duracao_ataque_frames, 4)
 
     self._estado_anterior = estado_atual
     self._acao_anterior = acao_registrada
-    self._adversario_com_especial_anterior = adversario_com_especial
 
     if self.exibir_debug:
       frame_debug = desenhar_info_vida(frame.copy(), info_vida)
-      frame_debug = desenhar_info_poder(frame_debug, info_poder)
       frame_debug = desenhar_info_personagens(frame_debug, info_personagens)
       frame_debug = self._desenhar_evento_debug(frame_debug)
       exibir(self._preparar_frame_debug(frame_debug))
 
     self._contador_frames += 1
     if (self._contador_frames % self._log_luta_cada) == 0:
-      log(
-        "ACAO:",
-        acao_registrada,
-        "RECOMPENSA:",
-        self._ultima_recompensa,
-      )
+      log("ESTADO:", estado_atual)
+      log("ACAO:", acao_registrada, "RECOMPENSA:", self._ultima_recompensa)
       log(
         "VIDA_VOCE:",
         self._formatar_pct(info_vida["vida_jogador_pct"]),
@@ -233,87 +174,12 @@ class Luta:
         self._formatar_pct(info_vida["vida_inimigo_pct"]),
         self._barra_vida_texto(info_vida["vida_inimigo_pct"]),
       )
-      if info_personagens:
-        log("DISTANCIA_HEROIS:", f"{info_personagens['distancia_px']}px")
-      if info_recompensa.get("destreza_perfeita"):
-        log("EVENTO: DESTREZA_PERFEITA (+2.5)")
-      elif info_recompensa.get("destreza_sem_penalidade"):
-        log("EVENTO: DESTREZA_SEM_PENALIDADE (combo/defensivo)")
-      elif info_recompensa.get("acao_destreza"):
-        log("EVENTO: DESTREZA_SEM_NECESSIDADE (-2.5)")
-      if info_recompensa.get("causou_dano"):
-        log("DANO_INIMIGO_DELTA:", f"{info_recompensa.get('delta_dano_inimigo', 0.0):.2f}%")
 
     self.vida_jogador_anterior = info_vida["vida_jogador_pct"]
     self.vida_inimigo_anterior = info_vida["vida_inimigo_pct"]
 
-  def _atualizar_evento_debug(self, info_recompensa):
-    if info_recompensa.get("destreza_perfeita"):
-      self._mensagem_evento_debug = "DESTREZA PERFEITA +2.5"
-      self._mensagem_evento_debug_restante = 20
-      return
-
-    if info_recompensa.get("acao_destreza"):
-      if info_recompensa.get("destreza_sem_penalidade"):
-        self._mensagem_evento_debug = "DESTREZA NO COMBO/DEFESA (SEM PENALIDADE)"
-        self._mensagem_evento_debug_restante = 20
-        return
-      self._mensagem_evento_debug = "DESTREZA SEM NECESSIDADE -2.5"
-      self._mensagem_evento_debug_restante = 20
-      return
-
-    if self._mensagem_evento_debug_restante > 0:
-      self._mensagem_evento_debug_restante -= 1
-
-  def _detectar_especiais(self, frame):
-    consultas = []
-    if self._tem_template_especial_jogador:
-      consultas.append(("esp_eu", self._template_especial_jogador, self._limiar_template_especial))
-    if self._tem_template_especial_inimigo:
-      consultas.append(("esp_adv", self._template_especial_inimigo, self._limiar_template_especial))
-
-    if not consultas:
-      return None, None
-
-    resultados = encontrar_templates_em_paralelo(frame, consultas)
-    eu_tenho_especial = (
-      resultados.get("esp_eu") is not None
-      if self._tem_template_especial_jogador
-      else None
-    )
-    adversario_com_especial = (
-      resultados.get("esp_adv") is not None
-      if self._tem_template_especial_inimigo
-      else None
-    )
-    return eu_tenho_especial, adversario_com_especial
-
-  def _detectar_sinais_estado(self, frame, info_vida, info_poder, info_personagens):
+  def _detectar_sinais_estado(self, info_vida):
     vida_jogador = info_vida.get("vida_jogador_pct")
-    vida_inimigo = info_vida.get("vida_inimigo_pct")
-    distancia_norm = None
-    if info_personagens:
-      distancia_norm = info_personagens.get("distancia_norm")
-
-    nivel_especial_jogador = info_poder.get("nivel_especial_jogador")
-    nivel_especial_inimigo = info_poder.get("nivel_especial_inimigo")
-    eu_tenho_especial = info_poder.get("tem_especial_jogador")
-    adversario_com_especial = info_poder.get("tem_especial_inimigo")
-    if (
-      eu_tenho_especial is None
-      or adversario_com_especial is None
-      or nivel_especial_jogador is None
-      or nivel_especial_inimigo is None
-    ):
-      tpl_eu, tpl_adv = self._detectar_especiais(frame)
-      if eu_tenho_especial is None:
-        eu_tenho_especial = tpl_eu
-      if adversario_com_especial is None:
-        adversario_com_especial = tpl_adv
-      if nivel_especial_jogador is None and tpl_eu is not None:
-        nivel_especial_jogador = 1 if tpl_eu else 0
-      if nivel_especial_inimigo is None and tpl_adv is not None:
-        nivel_especial_inimigo = 1 if tpl_adv else 0
 
     inimigo_atacando = False
     if (
@@ -323,53 +189,76 @@ class Luta:
       and info_vida.get("colunas_escuras_jogador_finais", 0) >= 1
     ):
       inimigo_atacando = True
+      self._frames_dano_recente = self._janela_dano_recente
+    elif self._frames_dano_recente > 0:
+      self._frames_dano_recente -= 1
 
-    eu_atacando = self._frames_ataque_jogador_restante > 0
-
-    mudou_vida = False
-    if (
-      vida_jogador is not None
-      and self.vida_jogador_anterior is not None
-      and vida_jogador != self.vida_jogador_anterior
-    ):
-      mudou_vida = True
-    if (
-      vida_inimigo is not None
-      and self.vida_inimigo_anterior is not None
-      and vida_inimigo != self.vida_inimigo_anterior
-    ):
-      mudou_vida = True
-
-    moveu = False
-    if distancia_norm is not None and self._distancia_norm_anterior is not None:
-      moveu = abs(distancia_norm - self._distancia_norm_anterior) > self._limiar_movimento_dist
-
-    if distancia_norm is not None:
-      self._distancia_norm_anterior = distancia_norm
-
-    if (not moveu) and (not mudou_vida) and (not eu_atacando) and (not inimigo_atacando):
-      self._frames_sem_movimento += 1
-    else:
-      self._frames_sem_movimento = 0
-
-    sem_movimento = self._frames_sem_movimento >= self._janela_sem_movimento
-    if adversario_com_especial is None:
-      postura_tatica = None
-    elif adversario_com_especial:
-      postura_tatica = "defensivo"
-    else:
-      postura_tatica = "agressivo"
+    tomou_dano_recente = self._frames_dano_recente > 0
 
     return {
-      "eu_tenho_especial": eu_tenho_especial,
-      "adversario_com_especial": adversario_com_especial,
-      "nivel_especial_jogador": nivel_especial_jogador,
-      "nivel_especial_inimigo": nivel_especial_inimigo,
-      "postura_tatica": postura_tatica,
-      "eu_atacando": eu_atacando,
       "inimigo_atacando": inimigo_atacando,
-      "sem_movimento": sem_movimento,
+      "tomou_dano_recente": tomou_dano_recente,
     }
+
+  def _atualizar_evento_debug(self, info_recompensa):
+    if info_recompensa.get("destreza_perfeita"):
+      self._mensagem_evento_debug = "DESTREZA PERFEITA +3"
+      self._mensagem_evento_debug_restante = 20
+      return
+    if info_recompensa.get("tomou_dano"):
+      self._mensagem_evento_debug = "TOMOU DANO -4"
+      self._mensagem_evento_debug_restante = 20
+      return
+    if info_recompensa.get("sobreviveu_perigo"):
+      self._mensagem_evento_debug = "SOBREVIVEU JANELA PERIGOSA +0.2"
+      self._mensagem_evento_debug_restante = 20
+      return
+    if info_recompensa.get("acao_destreza") and not info_recompensa.get("destreza_perfeita"):
+      self._mensagem_evento_debug = "DESTREZA SEM PERIGO -1"
+      self._mensagem_evento_debug_restante = 20
+      return
+
+    if self._mensagem_evento_debug_restante > 0:
+      self._mensagem_evento_debug_restante -= 1
+
+  def _registrar_log_episodio(self, resultado):
+    duracao = max(0.0, time.time() - self._episodio_inicio_ts)
+    registro = {
+      "etapa": 1,
+      "fase": 1,
+      "episodio": self.episodio,
+      "resultado": resultado,
+      "recompensa_total": round(self._recompensa_total_episodio, 3),
+      "duracao_segundos": round(duracao, 3),
+      "destrezas_perfeitas": int(self._destrezas_perfeitas_episodio),
+      "dano_tomado": round(self._dano_tomado_episodio, 3),
+    }
+    try:
+      CAMINHO_LOG_TREINO.parent.mkdir(parents=True, exist_ok=True)
+      with CAMINHO_LOG_TREINO.open("a", encoding="utf-8") as arquivo:
+        arquivo.write(json.dumps(registro, ensure_ascii=False) + "\n")
+    except OSError:
+      log("Falha ao registrar log de treino por episodio.")
+
+  def _iniciar_metricas_episodio(self):
+    self._episodio_inicio_ts = time.time()
+    self._recompensa_total_episodio = 0.0
+    self._destrezas_perfeitas_episodio = 0
+    self._dano_tomado_episodio = 0.0
+
+  def _resetar_contexto_pos_episodio(self):
+    self.estado = "BUSCANDO_LUTA"
+    self.vida_jogador_anterior = None
+    self.vida_inimigo_anterior = None
+    self._estado_anterior = None
+    self._acao_anterior = None
+    self._ultima_recompensa = 0.0
+    self._contador_frames = 0
+    self._mensagem_evento_debug = ""
+    self._mensagem_evento_debug_restante = 0
+    self._frames_dano_recente = 0
+    self.rastreador_personagens.reset()
+    self._iniciar_metricas_episodio()
 
   def _desenhar_evento_debug(self, frame):
     if self._mensagem_evento_debug_restante <= 0 or not self._mensagem_evento_debug:
@@ -392,7 +281,6 @@ class Luta:
       return None
     if self._debug_downscale <= 1:
       return frame
-    # Slicing reduz carga do debug sem custo de interpolacao.
     return frame[:: self._debug_downscale, :: self._debug_downscale].copy()
 
   @staticmethod

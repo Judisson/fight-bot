@@ -4,6 +4,7 @@
 - Confirmar se a mudanca pertence a `modo` ou `luta`.
 - Confirmar impacto em `arena`, `treino` e `calibracao`.
 - Confirmar impacto em `recompensa` e no espaco de acoes da IA.
+- Confirmar etapa/fase ativa no arquivo `regras/05-roadmap-etapas-fases.mdc`.
 
 ## Depois de editar
 - Rodar `python -m compileall src`.
@@ -11,6 +12,7 @@
 - Validar imports quebrados.
 - Validar fluxo de menu (`main`), luta e calibracao.
 - Validar se acao registrada em aprendizado foi realmente executada.
+- Em template matching de layout, priorizar ROI fixo calibrado; evitar busca no frame inteiro.
 
 ## OCR de vida
 - Verificar se o OCR usa apenas `src/visao/barras_vida.py` como recorte.

@@ -1,14 +1,18 @@
-ACAO_NADA = 0
+ACAO_ESPERAR = 0
 ACAO_DESTREZA = 1
-ACAO_COMBO_SEGURO = 2
-ACAO_BLOQUEIO = 3
-ACAO_DEFENSIVO = 4
-ACAO_ESPECIAL = 5
+ACAO_DEFENDER = 2
 
 ACOES_IA = [
-  ACAO_NADA,
+  ACAO_ESPERAR,
   ACAO_DESTREZA,
-  ACAO_COMBO_SEGURO,
-  ACAO_BLOQUEIO,
-  ACAO_ESPECIAL,
+  ACAO_DEFENDER,
 ]
+
+# FASE 2 (PENDENTE): liberar combo seguro no espaco de acoes.
+# ACAO_COMBO_SEGURO = 3
+
+# FASE 3 (PENDENTE): liberar especial no espaco de acoes.
+# ACAO_ESPECIAL = 4
+
+# ETAPA 2 (PENDENTE): ao migrar para DQN, manter o mesmo mapeamento de acoes
+# acima para evitar quebrar compatibilidade do executor e dos logs.

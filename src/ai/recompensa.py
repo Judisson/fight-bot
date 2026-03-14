@@ -1,16 +1,23 @@
 import os
 
-from src.ai.acoes import ACAO_COMBO_SEGURO, ACAO_DEFENSIVO, ACAO_DESTREZA
+from src.ai.acoes import ACAO_DESTREZA
 from src.ai.deteccao_luta import TEMPLATE_DERROTA, TEMPLATE_VITORIA
 from src.bot.visao import encontrar_template
 
-PESO_KO = -50.0
-PESO_VITORIA = 50.0
-PESO_PERDA_VIDA = -5.0
-PESO_DANO_INIMIGO_POR_PONTO = 1.2
-PESO_DESTREZA_PERFEITA = 2.5
-PESO_DESTREZA_SEM_PERFEICAO = -2.5
-PESO_BASE_SEM_EVENTO = 0.0
+# ETAPA 1 / FASE 1 (ATIVA): foco em sobrevivencia e tempo de resposta.
+PESO_KO = -20.0
+PESO_VITORIA = 0.0
+PESO_TOMOU_DANO = -4.0
+PESO_DESTREZA_PERFEITA = 3.0
+PESO_SOBREVIVEU_JANELA_PERIGOSA = 0.2
+PESO_DESTREZA_SEM_PERIGO = -1.0
+
+# FASE 2 (PENDENTE): introduzir bonus/penalidade de punicao ofensiva.
+# PESO_ACERTOU_PUNICAO = 1.0
+# PESO_TOMOU_CONTRA_ATAQUE = -2.0
+
+# FASE 3 (PENDENTE): considerar vitoria como bonus final da luta.
+# PESO_VITORIA = 50.0
 
 try:
   LIMIAR_DESTREZA = float(os.getenv("BOT_LIMIAR_DESTREZA", "0.8"))
@@ -25,7 +32,7 @@ def _detectar_destreza_perfeita(frame):
 def obter_recompensa(
   frame,
   acao_atual=None,
-  adversario_com_especial=False,
+  inimigo_atacando=False,
   vida_jogador_atual=None,
   vida_jogador_anterior=None,
   vida_inimigo_atual=None,
@@ -35,6 +42,8 @@ def obter_recompensa(
   nocaute_detectado=None,
   vitoria_detectada=None,
 ):
+  _ = (vida_inimigo_atual, vida_inimigo_anterior, colunas_escuras_inimigo_finais)
+
   if nocaute_detectado is None:
     nocaute = (frame is not None) and (encontrar_template(frame, TEMPLATE_DERROTA) is not None)
   else:
@@ -45,16 +54,14 @@ def obter_recompensa(
   else:
     vitoria = bool(vitoria_detectada)
 
-  houve_destreza = acao_atual in {ACAO_DESTREZA, ACAO_COMBO_SEGURO, ACAO_DEFENSIVO}
   info = {
     "nocaute": False,
     "vitoria": False,
-    "perdeu_vida": False,
-    "causou_dano": False,
-    "acao_destreza": houve_destreza,
+    "tomou_dano": False,
+    "tomou_dano_delta": 0.0,
+    "acao_destreza": acao_atual == ACAO_DESTREZA,
     "destreza_perfeita": False,
-    "destreza_sem_penalidade": False,
-    "delta_dano_inimigo": 0.0,
+    "sobreviveu_perigo": False,
   }
 
   if nocaute:
@@ -66,6 +73,8 @@ def obter_recompensa(
     return PESO_VITORIA, True, info
 
   recompensa = 0.0
+  tomou_dano = False
+  delta_dano = 0.0
 
   if (
     vida_jogador_atual is not None
@@ -73,32 +82,22 @@ def obter_recompensa(
     and vida_jogador_atual < vida_jogador_anterior
     and colunas_escuras_jogador_finais >= 1
   ):
-    recompensa += PESO_PERDA_VIDA
-    info["perdeu_vida"] = True
+    tomou_dano = True
+    delta_dano = float(vida_jogador_anterior) - float(vida_jogador_atual)
+    recompensa += PESO_TOMOU_DANO
+    info["tomou_dano"] = True
+    info["tomou_dano_delta"] = delta_dano
 
-  if (
-    vida_inimigo_atual is not None
-    and vida_inimigo_anterior is not None
-    and vida_inimigo_atual < vida_inimigo_anterior
-    and colunas_escuras_inimigo_finais >= 1
-  ):
-    delta_dano = float(vida_inimigo_anterior) - float(vida_inimigo_atual)
-    recompensa += delta_dano * PESO_DANO_INIMIGO_POR_PONTO
-    info["causou_dano"] = True
-    info["delta_dano_inimigo"] = delta_dano
-
-  if houve_destreza:
+  if acao_atual == ACAO_DESTREZA:
     destreza_perfeita = _detectar_destreza_perfeita(frame)
     info["destreza_perfeita"] = destreza_perfeita
-    sem_penalidade = (acao_atual == ACAO_COMBO_SEGURO) or bool(adversario_com_especial)
-    info["destreza_sem_penalidade"] = sem_penalidade
-
     if destreza_perfeita:
       recompensa += PESO_DESTREZA_PERFEITA
-    elif not sem_penalidade:
-      recompensa += PESO_DESTREZA_SEM_PERFEICAO
+    elif not inimigo_atacando:
+      recompensa += PESO_DESTREZA_SEM_PERIGO
 
-  if recompensa == 0.0:
-    recompensa = PESO_BASE_SEM_EVENTO
+  if inimigo_atacando and (not tomou_dano):
+    recompensa += PESO_SOBREVIVEU_JANELA_PERIGOSA
+    info["sobreviveu_perigo"] = True
 
   return recompensa, False, info

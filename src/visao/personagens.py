@@ -59,7 +59,7 @@ class RastreadorPersonagens:
 
     if usar_yolo and YOLO is not None:
       try:
-        self._modelo = YOLO(str(caminho))
+        self._modelo = YOLO(str(caminho)).to("cuda")
         self._configurar_device_yolo()
         log(f"Rastreador personagens: YOLO carregado ({caminho})")
         log(

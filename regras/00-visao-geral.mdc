@@ -7,6 +7,7 @@
 - `arena`: fluxo completo de fila/botoes + luta.
 - `treino`: foco em proficiencia da IA na luta.
 - `calibracao`: ajuste visual de barras de vida e poder.
+- `calibracao_roi`: ajuste manual do ROI de templates criticos (ex.: jogar novamente).
 
 ## Ponto de entrada
 - `python -m src.bot.main`
@@ -15,3 +16,5 @@
 ## Qualidade obrigatoria
 - Toda mudanca de IA/luta deve ter teste automatizado em `tests/`.
 - Antes de concluir alteracoes: rodar `python -m unittest discover -s tests -v`.
+- Roadmap ativo: apenas `Etapa 1 / Fase 1` esta implementada no codigo.
+- Etapas e fases restantes devem permanecer explicitamente comentadas como `PENDENTE`.

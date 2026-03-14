@@ -1,12 +1,13 @@
 from unittest import TestCase
 from unittest.mock import patch
 
-from src.ai.acoes import ACAO_COMBO_SEGURO, ACAO_DESTREZA
+from src.ai.acoes import ACAO_DESTREZA
 from src.ai.recompensa import (
+  PESO_DESTREZA_PERFEITA,
+  PESO_DESTREZA_SEM_PERIGO,
   PESO_KO,
-  PESO_VITORIA,
-  PESO_DANO_INIMIGO_POR_PONTO,
-  PESO_DESTREZA_SEM_PERFEICAO,
+  PESO_SOBREVIVEU_JANELA_PERIGOSA,
+  PESO_TOMOU_DANO,
   obter_recompensa,
 )
 
@@ -25,73 +26,63 @@ class TestRecompensa(TestCase):
     self.assertEqual(recompensa, PESO_KO)
     self.assertTrue(info["nocaute"])
 
-  def test_vitoria_aplica_bonus_terminal(self):
+  @patch("src.ai.recompensa._detectar_destreza_perfeita", return_value=False)
+  def test_tomou_dano_aplica_penalidade(self, _mock_destreza):
     recompensa, terminal, info = obter_recompensa(
       frame=None,
       acao_atual=0,
+      inimigo_atacando=True,
+      vida_jogador_atual=70.0,
+      vida_jogador_anterior=75.0,
+      colunas_escuras_jogador_finais=1,
       nocaute_detectado=False,
-      vitoria_detectada=True,
-    )
-
-    self.assertTrue(terminal)
-    self.assertEqual(recompensa, PESO_VITORIA)
-    self.assertTrue(info["vitoria"])
-
-  @patch("src.ai.recompensa._detectar_destreza_perfeita", return_value=False)
-  def test_combo_nao_penaliza_destreza(self, _mock_destreza):
-    recompensa, terminal, info = obter_recompensa(
-      frame=None,
-      acao_atual=ACAO_COMBO_SEGURO,
-      adversario_com_especial=False,
-      nocaute_detectado=False,
+      vitoria_detectada=False,
     )
 
     self.assertFalse(terminal)
-    self.assertEqual(recompensa, 0.0)
-    self.assertTrue(info["acao_destreza"])
-    self.assertTrue(info["destreza_sem_penalidade"])
+    self.assertEqual(recompensa, PESO_TOMOU_DANO)
+    self.assertTrue(info["tomou_dano"])
 
-  @patch("src.ai.recompensa._detectar_destreza_perfeita", return_value=False)
-  def test_destreza_sem_especial_mantem_penalidade(self, _mock_destreza):
+  @patch("src.ai.recompensa._detectar_destreza_perfeita", return_value=True)
+  def test_destreza_perfeita_pontua_positivo(self, _mock_destreza):
     recompensa, terminal, info = obter_recompensa(
       frame=None,
       acao_atual=ACAO_DESTREZA,
-      adversario_com_especial=False,
+      inimigo_atacando=True,
       nocaute_detectado=False,
+      vitoria_detectada=False,
     )
 
-    self.assertFalse(terminal)
-    self.assertEqual(recompensa, PESO_DESTREZA_SEM_PERFEICAO)
-    self.assertTrue(info["acao_destreza"])
-    self.assertFalse(info["destreza_sem_penalidade"])
-
-  @patch("src.ai.recompensa._detectar_destreza_perfeita", return_value=False)
-  def test_destreza_com_especial_inimigo_nao_penaliza(self, _mock_destreza):
-    recompensa, terminal, info = obter_recompensa(
-      frame=None,
-      acao_atual=ACAO_DESTREZA,
-      adversario_com_especial=True,
-      nocaute_detectado=False,
-    )
-
-    self.assertFalse(terminal)
-    self.assertEqual(recompensa, 0.0)
-    self.assertTrue(info["acao_destreza"])
-    self.assertTrue(info["destreza_sem_penalidade"])
-
-  def test_dano_inimigo_e_proporcional_ao_delta_de_vida(self):
-    recompensa, terminal, info = obter_recompensa(
-      frame=None,
-      acao_atual=0,
-      adversario_com_especial=False,
-      vida_inimigo_atual=65.0,
-      vida_inimigo_anterior=70.0,
-      colunas_escuras_inimigo_finais=1,
-      nocaute_detectado=False,
-    )
-
-    esperado = 5.0 * PESO_DANO_INIMIGO_POR_PONTO
+    esperado = PESO_DESTREZA_PERFEITA + PESO_SOBREVIVEU_JANELA_PERIGOSA
     self.assertFalse(terminal)
     self.assertAlmostEqual(recompensa, esperado, places=6)
-    self.assertTrue(info["causou_dano"])
-    self.assertAlmostEqual(info["delta_dano_inimigo"], 5.0, places=6)
+    self.assertTrue(info["destreza_perfeita"])
+
+  @patch("src.ai.recompensa._detectar_destreza_perfeita", return_value=False)
+  def test_destreza_sem_perigo_penaliza(self, _mock_destreza):
+    recompensa, terminal, info = obter_recompensa(
+      frame=None,
+      acao_atual=ACAO_DESTREZA,
+      inimigo_atacando=False,
+      nocaute_detectado=False,
+      vitoria_detectada=False,
+    )
+
+    self.assertFalse(terminal)
+    self.assertEqual(recompensa, PESO_DESTREZA_SEM_PERIGO)
+    self.assertTrue(info["acao_destreza"])
+
+  def test_sobreviveu_janela_perigosa_ganha_bonus(self):
+    recompensa, terminal, info = obter_recompensa(
+      frame=None,
+      acao_atual=0,
+      inimigo_atacando=True,
+      vida_jogador_atual=80.0,
+      vida_jogador_anterior=80.0,
+      nocaute_detectado=False,
+      vitoria_detectada=False,
+    )
+
+    self.assertFalse(terminal)
+    self.assertEqual(recompensa, PESO_SOBREVIVEU_JANELA_PERIGOSA)
+    self.assertTrue(info["sobreviveu_perigo"])
