@@ -1,10 +1,19 @@
-﻿import cv2
+﻿import os
+
+import cv2
+
+from src.utils.log import log
 
 from src.visao.barras_vida import extrair_barras, obter_bboxes_vida
 
 LIMIAR_COLUNA_ATIVA = 0.30
 
 _CONTADOR_TENTATIVAS = 0
+
+try:
+  LOG_VIDA_CADA = max(1, int(os.getenv("BOT_LOG_VIDA_CADA", "30")))
+except ValueError:
+  LOG_VIDA_CADA = 30
 
 
 def _extrair_faixa_central(roi):
@@ -82,11 +91,12 @@ def obter_info_vida(frame):
   ) = _detectar_percentual_por_cor(barra_inimigo)
 
   _CONTADOR_TENTATIVAS += 1
-  print(
-    f"[VIDA_COR #{_CONTADOR_TENTATIVAS}] "
-    f"JOG bbox={bbox_jogador} valor={vida_jogador_pct} conf={conf_jogador:.3f} esc_fim={colunas_escuras_jogador_finais} | "
-    f"INI bbox={bbox_inimigo} valor={vida_inimigo_pct} conf={conf_inimigo:.3f} esc_fim={colunas_escuras_inimigo_finais}"
-  )
+  if (_CONTADOR_TENTATIVAS % LOG_VIDA_CADA) == 0:
+    log(
+      f"[VIDA_COR #{_CONTADOR_TENTATIVAS}] "
+      f"JOG bbox={bbox_jogador} valor={vida_jogador_pct} conf={conf_jogador:.3f} esc_fim={colunas_escuras_jogador_finais} | "
+      f"INI bbox={bbox_inimigo} valor={vida_inimigo_pct} conf={conf_inimigo:.3f} esc_fim={colunas_escuras_inimigo_finais}"
+    )
 
   return {
     "bbox_jogador": bbox_jogador,
@@ -142,3 +152,4 @@ def desenhar_info_vida(frame, info_vida):
   )
 
   return frame
+

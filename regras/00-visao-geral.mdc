@@ -6,8 +6,12 @@
 ## Modos atuais
 - `arena`: fluxo completo de fila/botoes + luta.
 - `treino`: foco em proficiencia da IA na luta.
-- `calibracao`: ajuste visual de barras de vida.
+- `calibracao`: ajuste visual de barras de vida e poder.
 
 ## Ponto de entrada
 - `python -m src.bot.main`
 - O terminal escolhe FPS e modo com setas.
+
+## Qualidade obrigatoria
+- Toda mudanca de IA/luta deve ter teste automatizado em `tests/`.
+- Antes de concluir alteracoes: rodar `python -m unittest discover -s tests -v`.

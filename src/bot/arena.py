@@ -1,12 +1,15 @@
-﻿import time
+﻿import os
+import time
 
 from src.bot.acoes import clicar
 from src.bot.controle_fps import ControleFPS, obter_fps_alvo
-from src.bot.captura import capturar_tela
+from src.bot.captura import CapturaAssincrona
 from src.bot.foco import focar_jogo
 from src.bot.janela_jogo import encontrar_janela, obter_bbox_janela
 from src.bot.luta import Luta
-from src.bot.visao import encontrar_template
+from src.bot.visao import encontrar_templates_em_paralelo
+from src.utils.log import log
+from src.utils.visao_debug import atualizar_metricas
 
 TITULO_JOGO = "Champions"
 
@@ -21,31 +24,36 @@ BOTOES_ARENA = [
 
 
 def obter_monitor_jogo():
-  print("Procurando janela do jogo...")
+  log("Procurando janela do jogo...")
   janela = None
 
   while janela is None:
     janela = encontrar_janela(TITULO_JOGO)
     time.sleep(1)
 
-  print("Janela encontrada!")
+  log("Janela encontrada!")
 
   if focar_jogo(TITULO_JOGO):
-    print("Janela do jogo focada automaticamente.")
+    log("Janela do jogo focada automaticamente.")
     time.sleep(0.5)  # ← MUITO IMPORTANTE
   else:
-    print("Nao foi possivel focar automaticamente a janela.")
+    log("Nao foi possivel focar automaticamente a janela.")
 
   return obter_bbox_janela(janela)
 
 
 def processar_layout_arena(frame, monitor):
-  for nome_botao, caminho_template in BOTOES_ARENA:
-    botao = encontrar_template(frame, caminho_template)
+  resultados = encontrar_templates_em_paralelo(
+    frame,
+    [(nome, caminho_template) for nome, caminho_template in BOTOES_ARENA],
+  )
+
+  for nome_botao, _ in BOTOES_ARENA:
+    botao = resultados.get(nome_botao)
     if not botao:
       continue
 
-    print(f"Botao ({nome_botao}) encontrado!")
+    log(f"Botao ({nome_botao}) encontrado!")
     clicar(
       monitor["left"] + botao["x"],
       monitor["top"] + botao["y"],
@@ -62,19 +70,28 @@ def iniciar_arena(monitor=None):
 
   fps_alvo = obter_fps_alvo()
   controle_fps = ControleFPS(fps_alvo)
-  print(f"Arena iniciada com FPS alvo: {fps_alvo}")
+  log(f"Arena iniciada com FPS alvo: {fps_alvo}")
 
-  luta = Luta(exibir_debug=True)
+  exibir_debug = os.getenv("BOT_DEBUG", "1").strip() == "1"
+  luta = Luta(exibir_debug=exibir_debug)
+  capturador = CapturaAssincrona(monitor)
+  capturador.iniciar()
 
-  while True:
-    inicio_ciclo = controle_fps.iniciar_ciclo()
+  try:
+    while True:
+      inicio_ciclo = controle_fps.iniciar_ciclo()
 
-    try:
-      frame = capturar_tela(monitor)
+      try:
+        frame = capturador.obter_frame(timeout=0.05)
+        if frame is None:
+          continue
 
-      if processar_layout_arena(frame, monitor):
-        continue
+        if processar_layout_arena(frame, monitor):
+          continue
 
-      luta.processar_frame(frame)
-    finally:
-      controle_fps.finalizar_ciclo(inicio_ciclo)
+        luta.processar_frame(frame)
+      finally:
+        controle_fps.finalizar_ciclo(inicio_ciclo)
+        atualizar_metricas(controle_fps.obter_metricas())
+  finally:
+    capturador.parar()

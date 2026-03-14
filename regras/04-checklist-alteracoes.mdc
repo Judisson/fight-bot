@@ -1,14 +1,16 @@
-﻿# Checklist de Alteracoes
+# Checklist de Alteracoes
 
 ## Antes de editar
 - Confirmar se a mudanca pertence a `modo` ou `luta`.
 - Confirmar impacto em `arena`, `treino` e `calibracao`.
+- Confirmar impacto em `recompensa` e no espaco de acoes da IA.
 
 ## Depois de editar
 - Rodar `python -m compileall src`.
-- Remover `__pycache__` local.
+- Rodar `python -m unittest discover -s tests -v`.
 - Validar imports quebrados.
 - Validar fluxo de menu (`main`), luta e calibracao.
+- Validar se acao registrada em aprendizado foi realmente executada.
 
 ## OCR de vida
 - Verificar se o OCR usa apenas `src/visao/barras_vida.py` como recorte.

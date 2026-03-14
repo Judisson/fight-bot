@@ -2,6 +2,7 @@
 import sys
 
 from src.bot.arena import iniciar_arena
+from src.bot.debug_simples import iniciar_debug_simples
 from src.bot.treino import iniciar_treino
 from src.calibracao.modo_calibracao import iniciar_calibracao
 
@@ -13,7 +14,8 @@ OPCOES_FPS = [
 MODOS = [
   ("arena", "Fluxo completo da arena"),
   ("treino", "Treino da IA em combate"),
-  ("calibracao", "Ajustar posicoes e barras de vida"),
+  ("debug", "Tela simples de debug com YOLO"),
+  ("calibracao", "Ajustar posicoes de vida e poder"),
 ]
 
 
@@ -115,6 +117,10 @@ def main() -> None:
 
   if modo == "calibracao":
     iniciar_calibracao()
+    return
+
+  if modo == "debug":
+    iniciar_debug_simples()
     return
 
   iniciar_treino()

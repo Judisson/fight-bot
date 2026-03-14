@@ -8,6 +8,16 @@
 - `src/bot/luta.py`: estado da luta, acao da IA, recompensa, debug.
 - `src/bot/treino.py`: orquestracao do modo treino.
 - `src/bot/arena.py`: orquestracao do modo arena.
+- `src/bot/acoes_luta.py`: execucao assincrona de acoes (fila + worker).
 
 ## Nao fazer
 - Nao colocar logica de decisao da luta dentro de `treino` ou `arena`.
+
+## Estado tatico obrigatorio
+- `postura_tatica=defensivo` quando adversario tem qualquer nivel de especial.
+- `postura_tatica=agressivo` quando adversario nao tem especial.
+- Em `postura_tatica=defensivo`, priorizar acao defensiva (`bloqueio + destreza`).
+
+## Regra de consistencia de aprendizado
+- So registrar em `_acao_anterior` a acao efetivamente executada.
+- Se a fila de acoes estiver cheia e a acao for descartada, registrar `ACAO_NADA` para evitar aprendizado incorreto.
