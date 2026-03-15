@@ -1,6 +1,12 @@
 import os
 
-from src.ai.acoes import ACAO_ATAQUE_LEVE, ACAO_ATAQUE_MEDIO, ACAO_DEFENDER, ACAO_DESTREZA
+from src.ai.acoes import (
+  ACAO_ATAQUE_LEVE,
+  ACAO_ATAQUE_MEDIO,
+  ACAO_ATAQUE_PESADO,
+  ACAO_BLOQUEIO,
+  ACAO_ESQUIVA,
+)
 from src.ai.deteccao_luta import TEMPLATE_DERROTA, TEMPLATE_VITORIA
 from src.ai.modo_treino import resolver_modo_treino
 from src.bot.visao import encontrar_template
@@ -101,9 +107,12 @@ def _base_info(acao_atual):
     "tomou_dano_delta": 0.0,
     "causou_dano": False,
     "dano_inimigo_delta": 0.0,
-    "acao_destreza": acao_atual == ACAO_DESTREZA,
-    "acao_bloqueio": acao_atual == ACAO_DEFENDER,
-    "acao_ataque": acao_atual in (ACAO_ATAQUE_LEVE, ACAO_ATAQUE_MEDIO),
+    "acao_esquiva": acao_atual == ACAO_ESQUIVA,
+    "acao_destreza": acao_atual == ACAO_ESQUIVA,
+    "acao_bloqueio": acao_atual == ACAO_BLOQUEIO,
+    "acao_ataque": acao_atual in (ACAO_ATAQUE_LEVE, ACAO_ATAQUE_MEDIO, ACAO_ATAQUE_PESADO),
+    "ataque_pesado_tentado": acao_atual == ACAO_ATAQUE_PESADO,
+    "esquiva_tentada": False,
     "destreza_tentada": False,
     "destreza_perfeita": False,
     "destreza_quase": False,
@@ -132,7 +141,8 @@ def _recompensa_acao(
 ):
   recompensa = 0.0
 
-  if acao_atual == ACAO_DESTREZA:
+  if acao_atual == ACAO_ESQUIVA:
+    info["esquiva_tentada"] = True
     info["destreza_tentada"] = True
     dist_perto = _distancia_perto(distancia_px)
     destreza_longe_ruim = dist_perto is False
@@ -154,7 +164,7 @@ def _recompensa_acao(
       info["destreza_errada"] = True
     return recompensa
 
-  if acao_atual == ACAO_DEFENDER:
+  if acao_atual == ACAO_BLOQUEIO:
     info["bloqueio_tentado"] = True
     aparar_perfeito = _detectar_aparar_perfeito(frame)
     info["aparar_perfeito"] = aparar_perfeito
@@ -168,7 +178,7 @@ def _recompensa_acao(
       info["bloqueio_errado"] = True
     return recompensa
 
-  if acao_atual in (ACAO_ATAQUE_LEVE, ACAO_ATAQUE_MEDIO) and inimigo_atacando:
+  if acao_atual in (ACAO_ATAQUE_LEVE, ACAO_ATAQUE_MEDIO, ACAO_ATAQUE_PESADO) and inimigo_atacando:
     recompensa += PESO_ATAQUE_EM_PERIGO
 
   return recompensa
@@ -184,8 +194,8 @@ def _aplicar_eventos_comuns(
   bloqueio_consecutivo,
   tempo_parado_frames,
 ):
-  acao_reacao = acao_atual in (ACAO_DESTREZA, ACAO_DEFENDER)
-  if acao_atual == ACAO_DESTREZA and info.get("destreza_longe_ruim"):
+  acao_reacao = acao_atual in (ACAO_ESQUIVA, ACAO_BLOQUEIO)
+  if acao_atual == ACAO_ESQUIVA and info.get("destreza_longe_ruim"):
     acao_reacao = False
 
   if inimigo_atacando:
@@ -200,11 +210,11 @@ def _aplicar_eventos_comuns(
     recompensa += PESO_SOBREVIVEU_JANELA_PERIGOSA
     info["sobreviveu_perigo"] = True
 
-  if destreza_consecutiva and acao_atual == ACAO_DESTREZA:
+  if destreza_consecutiva and acao_atual == ACAO_ESQUIVA:
     recompensa += PESO_SPAM_DESTREZA
     info["spam_destreza"] = True
 
-  if bloqueio_consecutivo and acao_atual == ACAO_DEFENDER:
+  if bloqueio_consecutivo and acao_atual == ACAO_BLOQUEIO:
     recompensa += PESO_SPAM_BLOQUEIO
     info["spam_bloqueio"] = True
 

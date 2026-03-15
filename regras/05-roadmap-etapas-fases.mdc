@@ -1,7 +1,9 @@
 # Roadmap de Treino (Obrigatorio)
 
 ## Estado atual (ativo no codigo)
-- `modelo unico`: `treino_modelo` no menu.
+- Menu de treino:
+  - `treino` -> `treino_normal` (online PPO)
+  - `treino` -> `treino_observacao` (coleta humana por tecla, sem interferir na gameplay)
 - Arquitetura: `Pixel 128x128 + stack 4 + CNN + PPO`.
 - Acoes: `esperar`, `destreza`, `defender`, `ataque_leve`, `ataque_medio`.
 

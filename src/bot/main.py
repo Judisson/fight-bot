@@ -1,9 +1,10 @@
-﻿import os
+import os
 import sys
 
 from src.bot.arena import iniciar_arena
 from src.bot.debug_simples import iniciar_debug_simples
 from src.bot.treino import iniciar_treino
+from src.bot.treino_observacao import iniciar_treino_observacao
 from src.calibracao.modo_calibracao import iniciar_calibracao
 from src.calibracao.modo_calibracao_roi import iniciar_calibracao_roi_jogar_novamente
 
@@ -14,10 +15,15 @@ OPCOES_FPS = [
 
 MODOS = [
   ("arena", "Fluxo completo da arena"),
-  ("treino_modelo", "Treino unico Pixel + CNN + PPO"),
+  ("treino", "Menu de treino"),
   ("debug", "Tela simples de debug com YOLO"),
   ("calibracao", "Ajustar posicoes de vida e poder"),
   ("calibracao_roi", "Calibrar ROI do jogar novamente"),
+]
+
+MODOS_TREINO = [
+  ("treino_normal", "Treino normal IA Pixel + CNN + PPO"),
+  ("treino_observacao", "Treino observacao (sem interferir)"),
 ]
 
 
@@ -30,6 +36,9 @@ def ler_tecla():
     import msvcrt
 
     tecla = msvcrt.getwch()
+    if tecla == "\x03":
+      raise KeyboardInterrupt
+
     if tecla in ("\x00", "\xe0"):
       especial = msvcrt.getwch()
       if especial == "H":
@@ -40,6 +49,10 @@ def ler_tecla():
 
     if tecla == "\r":
       return "enter"
+    if tecla == "\x1b":
+      return "back"
+    if tecla.lower() == "q":
+      return "back"
 
     return "other"
 
@@ -52,6 +65,8 @@ def ler_tecla():
   try:
     tty.setraw(fd)
     tecla = sys.stdin.read(1)
+    if tecla == "\x03":
+      raise KeyboardInterrupt
 
     if tecla == "\x1b":
       sequencia = sys.stdin.read(2)
@@ -59,17 +74,19 @@ def ler_tecla():
         return "up"
       if sequencia == "[B":
         return "down"
-      return "other"
+      return "back"
 
     if tecla in ("\r", "\n"):
       return "enter"
+    if tecla.lower() == "q":
+      return "back"
 
     return "other"
   finally:
     termios.tcsetattr(fd, termios.TCSADRAIN, antigo)
 
 
-def escolher_com_setas(titulo, opcoes):
+def escolher_com_setas(titulo, opcoes, permitir_voltar=False):
   indice_atual = 0
 
   while True:
@@ -81,10 +98,13 @@ def escolher_com_setas(titulo, opcoes):
 
     for indice, (valor, descricao) in enumerate(opcoes):
       cursor = ">" if indice == indice_atual else " "
-      print(f" {cursor} {valor:<8} {descricao}")
+      print(f" {cursor} {valor:<18} {descricao}")
 
     print("")
-    print("Atalhos: ↑/↓, Enter")
+    if permitir_voltar:
+      print("Atalhos: up/down, Enter, Esc/Q (voltar), Ctrl+C (encerrar)")
+    else:
+      print("Atalhos: up/down, Enter, Ctrl+C (encerrar)")
 
     tecla = ler_tecla()
 
@@ -94,47 +114,73 @@ def escolher_com_setas(titulo, opcoes):
       indice_atual = (indice_atual + 1) % len(opcoes)
     elif tecla == "enter":
       return opcoes[indice_atual][0]
+    elif tecla == "back" and permitir_voltar:
+      return None
 
 
 def main() -> None:
-  fps_escolhido = escolher_com_setas(
-    "Escolha o FPS alvo:",
-    OPCOES_FPS,
-  )
+  while True:
+    fps_escolhido = escolher_com_setas(
+      "Escolha o FPS alvo:",
+      OPCOES_FPS,
+      permitir_voltar=False,
+    )
+    os.environ["BOT_FPS"] = fps_escolhido
 
-  os.environ["BOT_FPS"] = fps_escolhido
+    while True:
+      modo = escolher_com_setas(
+        "Escolha o modo de luta:",
+        MODOS,
+        permitir_voltar=True,
+      )
+      if modo is None:
+        break
 
-  modo = escolher_com_setas(
-    "Escolha o modo de luta:",
-    MODOS,
-  )
+      limpar_tela()
+      print(f"Iniciando modo: {modo} | FPS alvo: {fps_escolhido}")
+      print("")
 
-  limpar_tela()
-  print(f"Iniciando modo: {modo} | FPS alvo: {fps_escolhido}")
-  print("")
+      if modo == "arena":
+        iniciar_arena()
+        return
 
-  if modo == "arena":
-    iniciar_arena()
-    return
+      if modo == "treino":
+        while True:
+          modo_treino = escolher_com_setas(
+            "Escolha o tipo de treino:",
+            MODOS_TREINO,
+            permitir_voltar=True,
+          )
+          if modo_treino is None:
+            break
+          limpar_tela()
+          print(f"Iniciando treino: {modo_treino} | FPS alvo: {fps_escolhido}")
+          print("")
+          if modo_treino == "treino_observacao":
+            iniciar_treino_observacao()
+            return
+          iniciar_treino(modo_treino="treino")
+          return
+        continue
 
-  if modo == "calibracao":
-    iniciar_calibracao()
-    return
+      if modo == "calibracao":
+        iniciar_calibracao()
+        return
 
-  if modo == "calibracao_roi":
-    iniciar_calibracao_roi_jogar_novamente()
-    return
+      if modo == "calibracao_roi":
+        iniciar_calibracao_roi_jogar_novamente()
+        return
 
-  if modo == "debug":
-    iniciar_debug_simples()
-    return
+      if modo == "debug":
+        iniciar_debug_simples()
+        return
 
-  if modo == "treino_modelo":
-    iniciar_treino(modo_treino="treino")
-    return
-
-  iniciar_treino(modo_treino="treino")
+      iniciar_treino(modo_treino="treino")
+      return
 
 
 if __name__ == "__main__":
-  main()
+  try:
+    main()
+  except KeyboardInterrupt:
+    print("\nEncerrado pelo usuario.")

@@ -1,17 +1,13 @@
-﻿import queue
 import threading
 
 import cv2
 
 NOME_JANELA = "Visao do Bot"
+NOME_JANELA_PIXEL = "Debug Pixel"
+NOME_JANELA_PERCEPTRON = "Debug Perceptron"
 
-_janela_iniciada = False
-_renderer_iniciado = False
-_renderer_thread = None
+_janelas_iniciadas = {}
 _encerrar_solicitado = False
-
-_frame_queue = queue.Queue(maxsize=1)
-_stop_event = threading.Event()
 _metricas_lock = threading.Lock()
 _metricas = {
   "fps_real": 0.0,
@@ -21,14 +17,24 @@ _metricas = {
 }
 
 
-def _iniciar_janela():
-  global _janela_iniciada
-  if _janela_iniciada:
+def _obter_tamanho_janela(nome_janela):
+  if nome_janela == NOME_JANELA:
+    return (960, 540)
+  if nome_janela == NOME_JANELA_PIXEL:
+    return (760, 520)
+  if nome_janela == NOME_JANELA_PERCEPTRON:
+    return (560, 520)
+  return (960, 540)
+
+
+def _iniciar_janela(nome_janela):
+  if _janelas_iniciadas.get(nome_janela):
     return
 
-  cv2.namedWindow(NOME_JANELA, cv2.WINDOW_NORMAL)
-  cv2.resizeWindow(NOME_JANELA, 960, 540)
-  _janela_iniciada = True
+  cv2.namedWindow(nome_janela, cv2.WINDOW_NORMAL)
+  largura, altura = _obter_tamanho_janela(nome_janela)
+  cv2.resizeWindow(nome_janela, int(largura), int(altura))
+  _janelas_iniciadas[nome_janela] = True
 
 
 def atualizar_metricas(metricas):
@@ -64,58 +70,48 @@ def _desenhar_overlay(frame_debug):
   )
 
 
-def _loop_render():
+def exibir_multiplas(janelas, overlay_metricas_em=None):
   global _encerrar_solicitado
-  _iniciar_janela()
+  if _encerrar_solicitado:
+    raise KeyboardInterrupt("Encerrado pelo usuario (ESC).")
 
-  ultimo_frame = None
+  if not janelas:
+    return None
 
-  while not _stop_event.is_set():
-    try:
-      while True:
-        ultimo_frame = _frame_queue.get_nowait()
-    except queue.Empty:
-      pass
+  if overlay_metricas_em is None:
+    overlay_metricas_em = set()
+  else:
+    overlay_metricas_em = set(overlay_metricas_em)
 
-    if ultimo_frame is not None:
-      _desenhar_overlay(ultimo_frame)
-      cv2.imshow(NOME_JANELA, ultimo_frame)
+  for nome_janela, frame in janelas.items():
+    if frame is None:
+      continue
+    _iniciar_janela(nome_janela)
+    frame_exibir = frame.copy()
+    if nome_janela in overlay_metricas_em:
+      _desenhar_overlay(frame_exibir)
+    cv2.imshow(nome_janela, frame_exibir)
 
-    if cv2.waitKey(1) == 27:
-      _encerrar_solicitado = True
-      _stop_event.set()
-      break
+  tecla = cv2.waitKey(1) & 0xFF
+  if tecla == 27:
+    _encerrar_solicitado = True
+    raise KeyboardInterrupt("Encerrado pelo usuario (ESC).")
+  if tecla == 255:
+    return None
 
   try:
-    cv2.destroyWindow(NOME_JANELA)
+    return chr(tecla).lower()
   except Exception:
-    pass
-
-
-def _iniciar_renderer():
-  global _renderer_iniciado, _renderer_thread
-
-  if _renderer_iniciado:
-    return
-
-  _stop_event.clear()
-  _renderer_thread = threading.Thread(target=_loop_render, name="debug-render", daemon=True)
-  _renderer_thread.start()
-  _renderer_iniciado = True
+    return None
 
 
 def exibir(frame):
   if frame is None:
-    return
+    return None
 
-  _iniciar_renderer()
-
-  if _encerrar_solicitado:
-    raise KeyboardInterrupt("Encerrado pelo usuario (ESC).")
-
-  try:
-    if _frame_queue.full():
-      _frame_queue.get_nowait()
-    _frame_queue.put_nowait(frame)
-  except queue.Full:
-    pass
+  return exibir_multiplas(
+    {
+      NOME_JANELA: frame,
+    },
+    overlay_metricas_em={NOME_JANELA},
+  )

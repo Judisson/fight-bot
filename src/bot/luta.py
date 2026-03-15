@@ -8,19 +8,27 @@ import cv2
 from src.ai.acoes import (
   ACAO_ATAQUE_LEVE,
   ACAO_ATAQUE_MEDIO,
-  ACAO_DEFENDER,
-  ACAO_DESTREZA,
+  ACAO_ATAQUE_PESADO,
+  ACAO_BLOQUEIO,
   ACAO_ESPERAR,
+  ACAO_ESQUIVA,
   nome_acao,
 )
 from src.ai.cerebro import CerebroIA
 from src.ai.deteccao_luta import obter_estado_luta
 from src.ai.modo_treino import obter_acoes_permitidas, resolver_modo_treino
 from src.ai.recompensa import PESO_KO, PESO_VITORIA, obter_recompensa
-from src.bot.acoes_luta import executar_acao, obter_acao_em_execucao
+from src.bot.acoes_luta import executar_acao
+from src.bot.poder import obter_info_poder
 from src.bot.vida import desenhar_info_vida, obter_info_vida
+from src.utils.debug_rede_telas import gerar_tela_perceptron, gerar_tela_pixel
 from src.utils.log import log
-from src.utils.visao_debug import exibir
+from src.utils.visao_debug import (
+  NOME_JANELA,
+  NOME_JANELA_PERCEPTRON,
+  NOME_JANELA_PIXEL,
+  exibir_multiplas,
+)
 
 CAMINHO_LOG_TREINO = Path("data/treino_log.jsonl")
 
@@ -56,15 +64,29 @@ class Luta:
       self._janela_dano_recente = max(1, int(os.getenv("BOT_DANO_RECENTE_FRAMES", "8")))
     except ValueError:
       self._janela_dano_recente = 8
+    try:
+      self._qtd_filtros_snapshot = max(1, int(os.getenv("BOT_DEBUG_SNAPSHOT_FILTROS", "3")))
+    except ValueError:
+      self._qtd_filtros_snapshot = 3
+    tecla_snapshot = (os.getenv("BOT_DEBUG_SNAPSHOT_KEY", "p").strip() or "p")[0]
+    self._tecla_snapshot_filtro = tecla_snapshot.lower()
 
     self._contador_frames = 0
     self._mensagem_evento_debug = ""
     self._mensagem_evento_debug_restante = 0
     self._frames_dano_recente = 0
     self._frames_esperando_consecutivos = 0
+    self._espera_sem_pause_logada = False
+    self._acoes_fila_cheia_episodio = 0
+    self._ultimo_status_especial = None
 
     self._iniciar_metricas_episodio()
     log(f"Modo de treino ativo: {self.modo_treino.value}")
+    if self.exibir_debug:
+      log(
+        f"Debug filtro ativo. Pressione '{self._tecla_snapshot_filtro.upper()}' "
+        "na janela de debug para imprimir snapshot no console."
+      )
 
   def processar_frame(self, frame):
     estado_luta = obter_estado_luta(frame)
@@ -94,7 +116,7 @@ class Luta:
       log(f"Terminal detectado: {terminal.upper()} | episodio={self.episodio}")
       self._resetar_contexto_pos_episodio()
       if self.exibir_debug:
-        exibir(self._preparar_frame_debug(frame))
+        self._exibir_telas_debug(frame, info_vida=None, status_perceptron=f"estado={terminal}")
       time.sleep(2)
       return {
         "terminal": terminal,
@@ -102,6 +124,8 @@ class Luta:
       }
 
     if not em_luta:
+      if not self._espera_sem_pause_logada:
+        self._espera_sem_pause_logada = True
       self.cerebro.reset_observacao()
       self._estado_anterior = None
       self._acao_anterior = None
@@ -111,19 +135,24 @@ class Luta:
       self._frames_dano_recente = 0
       self._frames_esperando_consecutivos = 0
       if self.exibir_debug:
-        exibir(self._preparar_frame_debug(frame))
+        self._exibir_telas_debug(frame, info_vida=None, status_perceptron="estado=esperando")
       return {
         "terminal": None,
         "em_luta": False,
       }
 
     info_vida = obter_info_vida(frame)
+    self._registrar_log_especial(frame)
     sinais_estado = self._detectar_sinais_estado(info_vida)
     estado_atual = self.cerebro.obter_estado(
       frame=frame,
       info_vida=info_vida,
       sinais=sinais_estado,
     )
+
+    if self._espera_sem_pause_logada:
+      log("[LUTA] pausar-luta-button detectado -> retomando observacao e decisao da IA.")
+      self._espera_sem_pause_logada = False
 
     if self.estado != "LUTANDO":
       log("Luta comecou")
@@ -132,12 +161,12 @@ class Luta:
     info_recompensa = {}
     if self._estado_anterior is not None and self._acao_anterior is not None:
       destreza_consecutiva = (
-        self._acao_anterior == ACAO_DESTREZA
-        and self._acao_recompensada_anterior == ACAO_DESTREZA
+        self._acao_anterior == ACAO_ESQUIVA
+        and self._acao_recompensada_anterior == ACAO_ESQUIVA
       )
       bloqueio_consecutivo = (
-        self._acao_anterior == ACAO_DEFENDER
-        and self._acao_recompensada_anterior == ACAO_DEFENDER
+        self._acao_anterior == ACAO_BLOQUEIO
+        and self._acao_recompensada_anterior == ACAO_BLOQUEIO
       )
       recompensa, _, info_recompensa = obter_recompensa(
         frame,
@@ -163,6 +192,8 @@ class Luta:
       self._ultima_recompensa = recompensa
       self._recompensa_total_episodio += recompensa
 
+      if info_recompensa.get("esquiva_tentada"):
+        self._esquiva_tentada_episodio += 1
       if info_recompensa.get("destreza_tentada"):
         self._destreza_tentada_episodio += 1
       if info_recompensa.get("destreza_perfeita"):
@@ -179,6 +210,8 @@ class Luta:
         self._ataque_leve_tentado_episodio += 1
       if self._acao_anterior == ACAO_ATAQUE_MEDIO:
         self._ataque_medio_tentado_episodio += 1
+      if self._acao_anterior == ACAO_ATAQUE_PESADO:
+        self._ataque_pesado_tentado_episodio += 1
       if info_recompensa.get("tomou_dano"):
         self._dano_tomado_episodio += float(info_recompensa.get("tomou_dano_delta", 0.0))
       if info_recompensa.get("causou_dano"):
@@ -195,7 +228,11 @@ class Luta:
 
     acao = self.cerebro.escolher_acao(estado_atual)
     acao_executada = executar_acao(acao)
-    acao_registrada = acao if acao_executada else obter_acao_em_execucao()
+    # Evita enviesar treino/metricas repetindo a acao em execucao quando a fila esta cheia.
+    # Quando nao executa no frame atual, tratamos como esperar.
+    acao_registrada = acao if acao_executada else ACAO_ESPERAR
+    if not acao_executada:
+      self._acoes_fila_cheia_episodio += 1
 
     self._estado_anterior = estado_atual
     self._acao_anterior = acao_registrada
@@ -205,24 +242,13 @@ class Luta:
       self._frames_esperando_consecutivos = 0
 
     if self.exibir_debug:
-      frame_debug = desenhar_info_vida(frame.copy(), info_vida)
-      frame_debug = self._desenhar_evento_debug(frame_debug)
-      frame_debug = self._desenhar_debug_rede(frame_debug)
-      exibir(self._preparar_frame_debug(frame_debug))
+      self._exibir_telas_debug(frame, info_vida=info_vida, status_perceptron="estado=lutando")
 
     self._contador_frames += 1
     if (self._contador_frames % self._log_luta_cada) == 0:
       log("ACAO:", nome_acao(acao_registrada), f"({acao_registrada})", "RECOMPENSA:", self._ultima_recompensa)
-      log(
-        "VIDA_VOCE:",
-        self._formatar_pct(info_vida["vida_jogador_pct"]),
-        self._barra_vida_texto(info_vida["vida_jogador_pct"]),
-      )
-      log(
-        "VIDA_INIMIGO:",
-        self._formatar_pct(info_vida["vida_inimigo_pct"]),
-        self._barra_vida_texto(info_vida["vida_inimigo_pct"]),
-      )
+      if self._acoes_fila_cheia_episodio > 0:
+        log("FILA_ACOES_CHEIA:", self._acoes_fila_cheia_episodio)
 
     self.vida_jogador_anterior = info_vida["vida_jogador_pct"]
     self.vida_inimigo_anterior = info_vida["vida_inimigo_pct"]
@@ -256,7 +282,7 @@ class Luta:
 
   def _atualizar_evento_debug(self, info_recompensa):
     if info_recompensa.get("destreza_perfeita"):
-      self._mensagem_evento_debug = "DESTREZA PERFEITA +6"
+      self._mensagem_evento_debug = "DESTREZA (ESQUIVA PERFEITA) +6"
       self._mensagem_evento_debug_restante = 20
       return
     if info_recompensa.get("aparar_perfeito"):
@@ -272,7 +298,7 @@ class Luta:
       self._mensagem_evento_debug_restante = 20
       return
     if info_recompensa.get("destreza_longe_ruim"):
-      self._mensagem_evento_debug = "DESTREZA LONGE"
+      self._mensagem_evento_debug = "ESQUIVA LONGE"
       self._mensagem_evento_debug_restante = 20
       return
     if info_recompensa.get("spam_destreza"):
@@ -298,6 +324,7 @@ class Luta:
       "recompensa_total": round(self._recompensa_total_episodio, 3),
       "duracao_segundos": round(duracao, 3),
       "tempo_sobrevivencia": round(duracao, 3),
+      "esquiva_tentada": int(self._esquiva_tentada_episodio),
       "destreza_tentada": int(self._destreza_tentada_episodio),
       "destreza_perfeita": int(self._destreza_perfeita_episodio),
       "destreza_errada": int(self._destreza_errada_episodio),
@@ -306,6 +333,8 @@ class Luta:
       "bloqueio_errado": int(self._bloqueio_errado_episodio),
       "ataque_leve_tentado": int(self._ataque_leve_tentado_episodio),
       "ataque_medio_tentado": int(self._ataque_medio_tentado_episodio),
+      "ataque_pesado_tentado": int(self._ataque_pesado_tentado_episodio),
+      "acoes_fila_cheia": int(self._acoes_fila_cheia_episodio),
       "dano_tomado": round(self._dano_tomado_episodio, 3),
       "dano_inimigo": round(self._dano_inimigo_episodio, 3),
       "ppo_updates": int(debug_rede.get("updates", 0)),
@@ -321,6 +350,7 @@ class Luta:
   def _iniciar_metricas_episodio(self):
     self._episodio_inicio_ts = time.time()
     self._recompensa_total_episodio = 0.0
+    self._esquiva_tentada_episodio = 0
     self._destreza_tentada_episodio = 0
     self._destreza_perfeita_episodio = 0
     self._destreza_errada_episodio = 0
@@ -329,6 +359,8 @@ class Luta:
     self._bloqueio_errado_episodio = 0
     self._ataque_leve_tentado_episodio = 0
     self._ataque_medio_tentado_episodio = 0
+    self._ataque_pesado_tentado_episodio = 0
+    self._acoes_fila_cheia_episodio = 0
     self._dano_tomado_episodio = 0.0
     self._dano_inimigo_episodio = 0.0
 
@@ -345,6 +377,8 @@ class Luta:
     self._mensagem_evento_debug_restante = 0
     self._frames_dano_recente = 0
     self._frames_esperando_consecutivos = 0
+    self._espera_sem_pause_logada = False
+    self._ultimo_status_especial = None
     self.cerebro.reset_observacao()
     self._iniciar_metricas_episodio()
 
@@ -364,122 +398,63 @@ class Luta:
     )
     return frame
 
-  def _desenhar_debug_rede(self, frame):
-    info = self.cerebro.obter_debug_rede()
-    painel_largura = 390
-    painel_altura = 250
-    margem = 10
-    x0 = max(margem, frame.shape[1] - painel_largura - margem)
-    y0 = margem
-    x1 = min(frame.shape[1] - margem, x0 + painel_largura)
-    y1 = min(frame.shape[0] - margem, y0 + painel_altura)
+  def _exibir_telas_debug(self, frame, info_vida=None, status_perceptron=""):
+    frame_original = frame.copy()
+    if info_vida is not None:
+      frame_original = desenhar_info_vida(frame_original, info_vida)
+    frame_original = self._desenhar_evento_debug(frame_original)
+    frame_original = self._preparar_frame_debug(frame_original)
 
-    cv2.rectangle(frame, (x0, y0), (x1, y1), (30, 30, 30), thickness=-1)
-    cv2.rectangle(frame, (x0, y0), (x1, y1), (120, 120, 120), thickness=1)
-
-    cv2.putText(
-      frame,
-      "PPO PIXEL DEBUG",
-      (x0 + 10, y0 + 20),
-      cv2.FONT_HERSHEY_SIMPLEX,
-      0.55,
-      (240, 240, 240),
-      1,
-      cv2.LINE_AA,
+    frame_pixel = gerar_tela_pixel(self.cerebro, titulo="PPO PIXEL INPUT")
+    frame_perceptron = gerar_tela_perceptron(
+      self.cerebro,
+      titulo="PPO PIXEL PERCEPTRON",
+      linha_status=status_perceptron,
+      tecla_snapshot=self._tecla_snapshot_filtro,
     )
 
-    linha_y = y0 + 42
-    cv2.putText(
-      frame,
-      f"acao: {info.get('acao_nome')} ({info.get('acao')})",
-      (x0 + 10, linha_y),
-      cv2.FONT_HERSHEY_SIMPLEX,
-      0.48,
-      (0, 220, 255),
-      1,
-      cv2.LINE_AA,
+    tecla_debug = exibir_multiplas(
+      {
+        NOME_JANELA: frame_original,
+        NOME_JANELA_PIXEL: frame_pixel,
+        NOME_JANELA_PERCEPTRON: frame_perceptron,
+      },
+      overlay_metricas_em={NOME_JANELA},
     )
-    linha_y += 20
-    cv2.putText(
-      frame,
-      (
-        f"V(s): {info.get('valor', 0.0):.3f} | "
-        f"H: {info.get('entropia', 0.0):.3f}"
-      ),
-      (x0 + 10, linha_y),
-      cv2.FONT_HERSHEY_SIMPLEX,
-      0.45,
-      (180, 220, 180),
-      1,
-      cv2.LINE_AA,
+    self._processar_tecla_debug(tecla_debug)
+
+  def _processar_tecla_debug(self, tecla_debug):
+    if not tecla_debug:
+      return
+    if str(tecla_debug).lower() != self._tecla_snapshot_filtro:
+      return
+    log(
+      f"[SNAPSHOT_FILTRO] tecla '{self._tecla_snapshot_filtro.upper()}' detectada. "
+      "Imprimindo filtros aprendidos."
     )
-    linha_y += 18
-    cv2.putText(
-      frame,
-      (
-        f"updates: {info.get('updates', 0)} | passos: {info.get('passos', 0)} | "
-        f"buffer: {info.get('buffer', 0)}/{info.get('rollout_size', 0)}"
-      ),
-      (x0 + 10, linha_y),
-      cv2.FONT_HERSHEY_SIMPLEX,
-      0.42,
-      (190, 190, 190),
-      1,
-      cv2.LINE_AA,
+    self.cerebro.imprimir_snapshot_filtros(
+      origem="treino_normal",
+      max_filtros=self._qtd_filtros_snapshot,
     )
 
-    linha_y += 20
-    cv2.putText(
-      frame,
-      (
-        f"loss pi={info.get('policy_loss', 0.0):.4f} "
-        f"v={info.get('value_loss', 0.0):.4f}"
-      ),
-      (x0 + 10, linha_y),
-      cv2.FONT_HERSHEY_SIMPLEX,
-      0.42,
-      (220, 200, 160),
-      1,
-      cv2.LINE_AA,
+  def _registrar_log_especial(self, frame):
+    info_poder = obter_info_poder(frame, log_segmentos=False)
+    tem_jogador = info_poder.get("tem_especial_jogador")
+    tem_inimigo = info_poder.get("tem_especial_inimigo")
+
+    if tem_jogador is None or tem_inimigo is None:
+      return
+
+    estado_atual = (bool(tem_jogador), bool(tem_inimigo))
+    if estado_atual == self._ultimo_status_especial:
+      return
+
+    self._ultimo_status_especial = estado_atual
+    log(
+      "[ESPECIAL]",
+      f"player={'SIM' if estado_atual[0] else 'NAO'}",
+      f"inimigo={'SIM' if estado_atual[1] else 'NAO'}",
     )
-
-    probs = info.get("probs", {})
-    bar_x = x0 + 10
-    bar_y = linha_y + 20
-    bar_h = 16
-    bar_w_max = max(40, painel_largura - 170)
-
-    for acao, prob in sorted(probs.items(), key=lambda item: int(item[0])):
-      nome = nome_acao(int(acao))
-      cv2.putText(
-        frame,
-        f"{nome[:13]:<13}",
-        (bar_x, bar_y + 12),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.40,
-        (230, 230, 230),
-        1,
-        cv2.LINE_AA,
-      )
-      x_bar = bar_x + 130
-      largura = int(max(0.0, min(1.0, float(prob))) * bar_w_max)
-      cv2.rectangle(frame, (x_bar, bar_y), (x_bar + bar_w_max, bar_y + bar_h), (60, 60, 60), thickness=-1)
-      cv2.rectangle(frame, (x_bar, bar_y), (x_bar + largura, bar_y + bar_h), (0, 180, 255), thickness=-1)
-      cv2.putText(
-        frame,
-        f"{float(prob) * 100.0:5.1f}%",
-        (x_bar + bar_w_max + 6, bar_y + 12),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.38,
-        (220, 220, 220),
-        1,
-        cv2.LINE_AA,
-      )
-      bar_y += 20
-      if bar_y + bar_h >= y1 - 5:
-        break
-
-    return frame
 
   def _preparar_frame_debug(self, frame):
     if frame is None:

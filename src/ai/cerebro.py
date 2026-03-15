@@ -133,6 +133,8 @@ class CerebroIA:
     self._ultima_policy_loss = 0.0
     self._ultima_value_loss = 0.0
     self._ultima_perda_total = 0.0
+    self._ultimo_movimento_score = 0.0
+    self._ultimo_frame_diff = np.zeros((self.FRAME_SIZE, self.FRAME_SIZE), dtype=np.uint8)
 
     self._carregar_memoria()
     atexit.register(self.salvar_memoria)
@@ -142,6 +144,19 @@ class CerebroIA:
       f"device={self._device} | frame={self.FRAME_SIZE}x{self.FRAME_SIZE} | "
       f"stack={self.STACK_SIZE} | acoes={len(self.acoes)}"
     )
+
+  @staticmethod
+  def _formatar_matriz_int(matriz):
+    linhas = []
+    for linha in matriz:
+      linhas.append("[" + " ".join(f"{int(v):>3d}" for v in linha) + "]")
+    return "\n".join(linhas)
+
+  @staticmethod
+  def _quantizar_intervalo(valor, max_abs, escala=10):
+    if max_abs <= 1e-8:
+      return 0
+    return int(np.rint((float(valor) / float(max_abs)) * float(escala)))
 
   def _carregar_memoria(self):
     if not CAMINHO_MODELO_IA.exists():
@@ -206,6 +221,7 @@ class CerebroIA:
     _ = (info_vida, info_personagens, sinais)
 
     quadro_proc = self._preprocessar_frame(frame)
+    quadro_anterior = self._stack_frames[-1] if self._stack_frames else None
     if not self._stack_frames:
       for _i in range(self.STACK_SIZE):
         self._stack_frames.append(quadro_proc)
@@ -214,6 +230,13 @@ class CerebroIA:
 
     estado = np.stack(self._stack_frames, axis=0).astype(np.float32)
     self._ultima_observacao = estado
+    if quadro_anterior is None:
+      self._ultimo_movimento_score = 0.0
+      self._ultimo_frame_diff = np.zeros((self.FRAME_SIZE, self.FRAME_SIZE), dtype=np.uint8)
+    else:
+      diff = np.abs(quadro_proc - quadro_anterior)
+      self._ultimo_movimento_score = float(np.mean(diff))
+      self._ultimo_frame_diff = np.clip(diff * 255.0, 0, 255).astype(np.uint8)
     return estado
 
   def _tensor_obs(self, obs):
@@ -252,6 +275,26 @@ class CerebroIA:
         "valor": valor_estado,
       }
     )
+    return acao
+
+  def inferir_acao_passiva(self, estado, usar_amostragem=True):
+    obs_t = self._tensor_obs(estado)
+    with torch.no_grad():
+      logits, valor = self._modelo(obs_t)
+      dist = Categorical(logits=logits)
+      if usar_amostragem:
+        indice = int(dist.sample().item())
+      else:
+        indice = int(torch.argmax(dist.probs, dim=1).item())
+      probs = dist.probs.squeeze(0).detach().cpu().numpy().astype(np.float32)
+      entropia = float(dist.entropy().item())
+      valor_estado = float(valor.squeeze(0).item())
+
+    acao = int(self.acoes[indice])
+    self._ultima_acao = acao
+    self._ultimo_valor = valor_estado
+    self._ultima_entropia = entropia
+    self._ultimas_probs = {int(self.acoes[i]): float(probs[i]) for i in range(len(self.acoes))}
     return acao
 
   def _recompor_pendente(self, estado, acao):
@@ -387,6 +430,61 @@ class CerebroIA:
     if (self._atualizacoes % self.salvar_a_cada_updates) == 0:
       self.salvar_memoria()
 
+  def imprimir_snapshot_filtros(self, origem="debug", max_filtros=3):
+    try:
+      max_filtros = max(1, int(max_filtros))
+    except (TypeError, ValueError):
+      max_filtros = 3
+
+    camada_conv1 = self._modelo.conv[0]
+    pesos = camada_conv1.weight.detach().cpu().numpy().astype(np.float32)
+    total_filtros = int(pesos.shape[0])
+    qtd = min(total_filtros, max_filtros)
+
+    log("")
+    log("=" * 78)
+    log(
+      f"[SNAPSHOT_FILTRO] origem={origem} | updates={self._atualizacoes} | "
+      f"passos={self._passos_totais} | conv1_shape={tuple(pesos.shape)}"
+    )
+
+    # Kernel medio por canal de entrada, quantizado para facilitar leitura no console.
+    for idx in range(qtd):
+      kernel = np.mean(pesos[idx], axis=0)  # [8, 8]
+      max_abs = float(np.max(np.abs(kernel)))
+      kernel_q = np.vectorize(self._quantizar_intervalo)(kernel, max_abs, 10).astype(np.int32)
+      log(
+        f"[SNAPSHOT_FILTRO] conv1_kernel[{idx}] media-canais "
+        f"(escala -10..10 | max_abs={max_abs:.6f})"
+      )
+      log(self._formatar_matriz_int(kernel_q))
+
+    # Mapa de ativacao: mostra onde a rede esta enxergando estrutura no frame atual.
+    obs = np.asarray(self._ultima_observacao, dtype=np.float32)
+    if obs.size == 0:
+      log("[SNAPSHOT_FILTRO] sem observacao para gerar mapa de ativacao.")
+      log("=" * 78)
+      return
+
+    with torch.no_grad():
+      obs_t = torch.from_numpy(obs).unsqueeze(0).to(self._device)
+      ativacao_conv1 = camada_conv1(obs_t).detach().cpu().numpy()[0]  # [32, H, W]
+
+    energia = np.mean(np.abs(ativacao_conv1), axis=(1, 2))
+    idx_mais_ativo = int(np.argmax(energia))
+    mapa = np.abs(ativacao_conv1[idx_mais_ativo]).astype(np.float32)
+    mapa16 = cv2.resize(mapa, (16, 16), interpolation=cv2.INTER_AREA)
+    max_abs_mapa = float(np.max(np.abs(mapa16)))
+    mapa_q = np.vectorize(self._quantizar_intervalo)(mapa16, max_abs_mapa, 10).astype(np.int32)
+
+    log(
+      f"[SNAPSHOT_FILTRO] mapa_ativacao filtro={idx_mais_ativo} "
+      f"(0..10 | fundo tende a 0, regiao relevante tende a valores altos)"
+    )
+    log(self._formatar_matriz_int(mapa_q))
+    log("=" * 78)
+    log("")
+
   def obter_debug_rede(self):
     return {
       "acao": int(self._ultima_acao),
@@ -401,4 +499,12 @@ class CerebroIA:
       "passos": int(self._passos_totais),
       "buffer": int(len(self._rollout_recompensas)),
       "rollout_size": int(self.rollout_size),
+      "movimento_score": float(self._ultimo_movimento_score),
+      "frame_diff": self._ultimo_frame_diff.copy(),
+    }
+
+  def obter_debug_pixel(self):
+    return {
+      "stack": self._ultima_observacao.copy(),
+      "frame_diff": self._ultimo_frame_diff.copy(),
     }

@@ -27,7 +27,30 @@ python -m src.bot.main
 
 A `main` abre um menu no terminal para escolher o modo:
 - `arena`: fluxo completo de botoes da arena + luta
-- `treino_modelo`: treino unico da IA `Pixel + CNN + PPO`
+- `treino`: abre submenu com:
+  - `treino_normal`: treino online da IA `Pixel + CNN + PPO`
+  - `treino_observacao`: coleta demonstracao humana (sem interferir na gameplay)
+
+Snapshot de filtro da CNN:
+- com a janela de debug aberta (`BOT_DEBUG=1`), pressione `P` para imprimir no console:
+  - kernels aprendidos da `conv1` (quantizados em `-10..10`)
+  - mapa de ativacao (`0..10`) para verificar fundo baixo e regiao relevante alta
+- para trocar a tecla: `BOT_DEBUG_SNAPSHOT_KEY=<tecla>`
+- para imprimir mais filtros por snapshot: `BOT_DEBUG_SNAPSHOT_FILTROS=6` (exemplo)
+- no treino com debug ativo, rodam 3 janelas:
+  - `Visao do Bot` (tela original)
+  - `Debug Pixel` (stack 4x128x128 + frame diff)
+  - `Debug Perceptron` (acao, probs, valor, entropia e losses)
+
+Dataset de demonstracoes:
+- `data/demonstrations/episode_001.npz`, `episode_002.npz`, ...
+- cada episodio salva:
+  - `states`, `next_states`, `actions`
+  - `action_labels` (inclui `esquiva/destreza`, `bloqueio/aparar`, `ataque_leve/medio/pesado`)
+  - `action_base_labels` (acao base antes do resultado perfeito)
+  - `rewards`, `rewards_base`, `rewards_bonus`
+  - `holds_ms` (duracao da tecla do ataque leve; usado para classificar ataque pesado)
+  - `destreza_perfeita`, `aparar_perfeito`, `dones`, `timestamps`
 
 ## Convencoes do projeto
 

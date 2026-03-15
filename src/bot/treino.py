@@ -86,6 +86,10 @@ def iniciar_treino(monitor=None, modo_treino="treino"):
   ultimo_log_fps_ts = 0.0
 
   exibir_debug = os.getenv("BOT_DEBUG", "1").strip() == "1"
+  if exibir_debug:
+    log("Tela debug da rede (perceptron) ativada.")
+  else:
+    log("Tela debug da rede desativada (BOT_DEBUG=0).")
   roi_jogar_novamente = obter_roi(ROI_JOGAR_NOVAMENTE)
   log(f"ROI jogar_novamente (x1,y1,x2,y2): {roi_jogar_novamente}")
   luta = Luta(exibir_debug=exibir_debug, modo_treino=modo_treino)
@@ -126,14 +130,6 @@ def iniciar_treino(monitor=None, modo_treino="treino"):
           and (agora - ultimo_log_fps_ts) >= intervalo_log_fps
         ):
           ultimo_log_fps_ts = agora
-          if logs_habilitados:
-            log(
-              "[TREINO_FPS]",
-              f"real={metricas['fps_real']:.1f}",
-              f"alvo={metricas['fps_alvo']}",
-              f"proc_ms={metricas['proc_ms']:.2f}",
-              f"sleep_ms={metricas['sleep_ms']:.2f}",
-            )
 
           if salvar_log_fps:
             registro = {

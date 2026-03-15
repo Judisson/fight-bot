@@ -160,7 +160,7 @@ def _detectar_nivel_especial(roi, ordem_segmentos):
   return nivel, percentuais_ordenados, percentual_total
 
 
-def obter_info_poder(frame):
+def obter_info_poder(frame, log_segmentos=False):
   global _CONTADOR_TENTATIVAS
 
   barra_jogador, barra_inimigo = extrair_barras_poder(frame)
@@ -181,7 +181,7 @@ def obter_info_poder(frame):
   tem_especial_inimigo = None if nivel_inimigo is None else (nivel_inimigo >= 1)
 
   _CONTADOR_TENTATIVAS += 1
-  if (_CONTADOR_TENTATIVAS % LOG_PODER_CADA) == 0:
+  if log_segmentos and ((_CONTADOR_TENTATIVAS % LOG_PODER_CADA) == 0):
     log(
       f"[PODER_SEG #{_CONTADOR_TENTATIVAS}] "
       f"JOG E={nivel_jogador} seg={segmentos_jogador_pct} | "
