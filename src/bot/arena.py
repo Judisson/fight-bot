@@ -1,4 +1,4 @@
-﻿import os
+import os
 import time
 
 from src.bot.acoes import clicar
@@ -35,7 +35,7 @@ def obter_monitor_jogo():
 
   if focar_jogo(TITULO_JOGO):
     log("Janela do jogo focada automaticamente.")
-    time.sleep(0.5)  # ← MUITO IMPORTANTE
+    time.sleep(0.5)  # ? MUITO IMPORTANTE
   else:
     log("Nao foi possivel focar automaticamente a janela.")
 
@@ -73,7 +73,7 @@ def iniciar_arena(monitor=None):
   log(f"Arena iniciada com FPS alvo: {fps_alvo}")
 
   exibir_debug = os.getenv("BOT_DEBUG", "1").strip() == "1"
-  luta = Luta(exibir_debug=exibir_debug, modo_treino="completo")
+  luta = Luta(exibir_debug=exibir_debug, modo_treino="treino")
   capturador = CapturaAssincrona(monitor)
   capturador.iniciar()
 
@@ -95,3 +95,4 @@ def iniciar_arena(monitor=None):
         atualizar_metricas(controle_fps.obter_metricas())
   finally:
     capturador.parar()
+

@@ -1,27 +1,20 @@
 # Arquitetura de Luta
 
 ## Regra principal
-- `Luta` recebe `modo_treino` e aplica curriculum por fase.
+- `Luta` usa somente um modo: `treino`.
+- A IA aprende com observacao de pixel puro: `frame 128x128 + stack de 4 frames + CNN + PPO`.
 - `treino` e `arena` apenas capturam frame e chamam `luta.processar_frame(frame)`.
 
 ## Responsabilidades
-- `src/bot/luta.py`: estado da luta, acao da IA, recompensa, debug.
-- `src/bot/treino.py`: orquestracao do modo treino.
-- `src/bot/arena.py`: orquestracao do modo arena.
+- `src/bot/luta.py`: estado da luta, decisao da IA, recompensa e debug da rede.
+- `src/bot/treino.py`: orquestracao do loop de treino.
+- `src/bot/arena.py`: orquestracao da arena e botoes de menu.
 - `src/bot/acoes_luta.py`: execucao assincrona de acoes (fila + worker).
 
 ## Nao fazer
 - Nao colocar logica de decisao da luta dentro de `treino` ou `arena`.
-
-## Estado tatico (pendente)
-- Etapa 1/Fase 1 ativa nao usa barra de poder para decidir postura.
-- `postura_tatica=defensivo/agressivo` fica `PENDENTE` para Fase 3.
-
-## Modo de treino atual
-- `destreza`: estado `dist_perto|atk_adv|dano_rec` e acoes `esperar/destreza`.
-- `bloqueio`: estado `dist_perto|atk_adv|dano_rec` e acoes `esperar/bloqueio`.
-- `contra_ataque` e `completo`: estado com bucket de distancia + sinais de ataque/dano.
+- Nao criar macro de combo; a rede deve aprender sequencias escolhendo `ataque_leve` e `ataque_medio` passo a passo.
 
 ## Regra de consistencia de aprendizado
 - So registrar em `_acao_anterior` a acao efetivamente executada.
-- Se a fila de acoes estiver cheia e a acao for descartada, registrar `ACAO_NADA` para evitar aprendizado incorreto.
+- Se a fila de acoes estiver cheia e a acao for descartada, registrar a acao em execucao atual para evitar aprendizado incorreto.

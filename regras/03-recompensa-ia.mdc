@@ -1,25 +1,28 @@
 # Regras de Recompensa da IA
 
-## Heuristica atual por modo
-- `destreza`:
+## Heuristica ativa
+- Eventos terminais:
+  - KO `-20`
+  - vitoria `+20`
+- Sobrevivencia:
+  - tomou dano `-5`
+  - sobreviveu janela perigosa `+0.2`
+  - tentou reagir ao ataque `+0.5`
+  - nao reagiu `-0.2`
+  - parado por muito tempo `-0.5`
+- Defesa:
   - destreza perfeita `+6`
   - destreza quase `+2`
-  - destreza errada `-1`
-  - tomou dano `-5`
-  - KO `-20`
-  - parado por muito tempo `-0.5`
-  - tentativa valida sob ataque `+0.5`, nao reagiu `-0.2`
-- `bloqueio`:
-  - aparar `+3`
+  - destreza sem contexto `-1`
+  - destreza longe `-1.5`
+  - aparar perfeito `+3`
   - bloqueio quase `+1`
-  - tomou dano `-5`
-- `contra_ataque`:
-  - bonus por dano no inimigo `+2`
-  - bonus de `combo apos destreza` `+4`
-- `completo`:
-  - combina sinais de destreza/bloqueio com penalidade de dano.
+  - bloqueio sem contexto `-1`
+- Ofensiva:
+  - dano no inimigo `+delta_vida_inimigo * 0.40`
+  - ataque durante perigo sem defesa `-0.2`
 
 ## Diretriz
-- Alteracoes de recompensa devem priorizar sobrevivencia e dano eficiente.
+- Priorizar sobrevivencia + dano eficiente.
 - Evitar recompensas que incentivem spam sem contexto de luta.
 - Nunca recompensar/penalizar acao que nao executou de fato.

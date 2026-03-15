@@ -1,14 +1,13 @@
 ﻿# Fight Bot
 
-Bot de luta com visao computacional + IA por reforco simples.
+Bot de luta com visao computacional + IA por reforco em pixel puro.
 
 ## Estrutura do projeto
 
 - `assets/`: imagens de referencia para deteccao na tela (botoes, KO, vida etc.)
-- `data/`: dados persistidos localmente (memoria/estado da IA)
-- `src/ai/`: decisao da IA, recompensa e deteccao de estado de luta
+- `data/`: dados persistidos localmente (checkpoint PPO, logs)
+- `src/ai/`: agente `Pixel + CNN + PPO`, recompensa e deteccao de estado de luta
 - `src/bot/`: captura da tela, acoes de teclado/mouse e launcher principal
-- `src/core/`: recursos compartilhados (ex.: persistencia)
 - `src/utils/`: utilitarios de debug
 
 ## Setup
@@ -28,7 +27,7 @@ python -m src.bot.main
 
 A `main` abre um menu no terminal para escolher o modo:
 - `arena`: fluxo completo de botoes da arena + luta
-- `treino`: foco no loop de treino da IA
+- `treino_modelo`: treino unico da IA `Pixel + CNN + PPO`
 
 ## Convencoes do projeto
 

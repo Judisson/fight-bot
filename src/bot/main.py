@@ -14,10 +14,7 @@ OPCOES_FPS = [
 
 MODOS = [
   ("arena", "Fluxo completo da arena"),
-  ("treino_destreza", "Curriculum F1: esperar + destreza"),
-  ("treino_bloqueio", "Curriculum F2: esperar + bloqueio"),
-  ("treino_contra_ataque", "Curriculum F3: contra-ataque"),
-  ("treino_completo", "Curriculum F4: tudo liberado"),
+  ("treino_modelo", "Treino unico Pixel + CNN + PPO"),
   ("debug", "Tela simples de debug com YOLO"),
   ("calibracao", "Ajustar posicoes de vida e poder"),
   ("calibracao_roi", "Calibrar ROI do jogar novamente"),
@@ -132,20 +129,11 @@ def main() -> None:
     iniciar_debug_simples()
     return
 
-  if modo == "treino_destreza":
-    iniciar_treino(modo_treino="destreza")
-    return
-  if modo == "treino_bloqueio":
-    iniciar_treino(modo_treino="bloqueio")
-    return
-  if modo == "treino_contra_ataque":
-    iniciar_treino(modo_treino="contra_ataque")
-    return
-  if modo == "treino_completo":
-    iniciar_treino(modo_treino="completo")
+  if modo == "treino_modelo":
+    iniciar_treino(modo_treino="treino")
     return
 
-  iniciar_treino(modo_treino="destreza")
+  iniciar_treino(modo_treino="treino")
 
 
 if __name__ == "__main__":

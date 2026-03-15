@@ -1,45 +1,5 @@
 {
-  "tabela_q": {
-    "dist_perto=x|atk_adv=0|dano_rec=0": {
-      "0": -3.1740352926874422,
-      "1": -4.716573697315875
-    },
-    "dist_perto=0|atk_adv=0|dano_rec=0": {
-      "0": -2.8740924946810633,
-      "1": -5.429743676212581
-    },
-    "dist_perto=1|atk_adv=0|dano_rec=0": {
-      "0": -2.7909138105095197,
-      "1": -3.029476983476303
-    },
-    "dist_perto=1|atk_adv=1|dano_rec=1": {
-      "0": -5.680983055568394,
-      "1": -6.5584415349123875
-    },
-    "dist_perto=1|atk_adv=0|dano_rec=1": {
-      "0": -4.850308122274096,
-      "1": -6.850318700650749
-    },
-    "dist_perto=0|atk_adv=0|dano_rec=1": {
-      "0": -3.2572693976888303,
-      "1": -5.933249797028549
-    },
-    "dist_perto=x|atk_adv=1|dano_rec=1": {
-      "0": -2.81597771731801,
-      "1": -3.9217408133269998
-    },
-    "dist_perto=x|atk_adv=0|dano_rec=1": {
-      "0": -3.1198748012879536,
-      "1": -4.502243938838143
-    },
-    "dist_perto=0|atk_adv=1|dano_rec=1": {
-      "0": -4.307353971687872,
-      "1": -6.132054913107721
-    }
-  },
-  "epsilon": 0.05,
-  "decaimento_epsilon": 0.9995,
-  "epsilon_minimo": 0.05,
-  "alpha": 0.2,
-  "gamma": 0.9
+  "modelo": "pixel_cnn_ppo",
+  "checkpoint": "data/modelo_pixel_ppo.pt",
+  "observacao": "arquivo informativo para o modelo atual baseado em pixels."
 }

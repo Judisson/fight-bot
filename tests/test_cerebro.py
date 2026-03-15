@@ -2,86 +2,66 @@ from pathlib import Path
 from unittest import TestCase
 from unittest.mock import patch
 
-from src.ai.acoes import ACAO_DEFENDER
+import numpy as np
+
 from src.ai.cerebro import CerebroIA
-from src.ai.modo_treino import ModoTreino
 
 
-def _novo_cerebro(modo_treino=ModoTreino.COMPLETO, acoes_permitidas=None):
+def _novo_cerebro():
   with patch("src.ai.cerebro.atexit.register", lambda *_args, **_kwargs: None):
-    with patch("src.ai.cerebro.CAMINHO_MEMORIA_IA", Path("data/memoria_ia_test_tmp.json")):
-      return CerebroIA(modo_treino=modo_treino, acoes_permitidas=acoes_permitidas)
+    with patch("src.ai.cerebro.CAMINHO_MODELO_IA", Path("data/modelo_pixel_ppo_test.pt")):
+      cerebro = CerebroIA(modo_treino="treino")
+      cerebro.rollout_size = 2
+      cerebro.update_epochs = 1
+      cerebro.minibatch_size = 2
+      return cerebro
 
 
 class TestCerebroIA(TestCase):
 
-  def test_q_update_usa_proximo_estado(self):
+  def setUp(self):
+    self.frame = np.zeros((360, 640, 3), dtype=np.uint8)
+    self.frame[100:200, 200:260] = 255
+
+  def test_obter_estado_pixel_stack(self):
     cerebro = _novo_cerebro()
-    estado = "s0"
-    proximo_estado = "s1"
-    acao = ACAO_DEFENDER
+    estado = cerebro.obter_estado(frame=self.frame)
 
-    q_estado = cerebro._obter_q_estado(estado)
-    q_estado[str(acao)] = 0.0
+    self.assertEqual(estado.shape, (4, 128, 128))
+    self.assertGreaterEqual(float(estado.min()), 0.0)
+    self.assertLessEqual(float(estado.max()), 1.0)
 
-    q_proximo = cerebro._obter_q_estado(proximo_estado)
-    q_proximo["0"] = 2.0
-    q_proximo["1"] = 1.0
-    q_proximo["2"] = 0.5
-
-    cerebro.aprender(estado, acao, recompensa=1.0, proximo_estado=proximo_estado, terminal=False)
-    esperado = 0.0 + cerebro.alpha * ((1.0 + (cerebro.gamma * 2.0)) - 0.0)
-
-    self.assertAlmostEqual(cerebro._obter_q_estado(estado)[str(acao)], esperado, places=6)
-
-  def test_q_update_terminal_ignora_futuro(self):
+  def test_escolher_acao_pertence_espaco(self):
     cerebro = _novo_cerebro()
-    estado = "terminal"
-    proximo_estado = "nao_importa"
+    estado = cerebro.obter_estado(frame=self.frame)
+    acao = cerebro.escolher_acao(estado)
 
-    q_estado = cerebro._obter_q_estado(estado)
-    q_estado["1"] = 1.0
+    self.assertIn(acao, cerebro.acoes)
+    debug = cerebro.obter_debug_rede()
+    self.assertEqual(debug["acao"], acao)
+    self.assertAlmostEqual(sum(debug["probs"].values()), 1.0, places=4)
 
-    q_proximo = cerebro._obter_q_estado(proximo_estado)
-    q_proximo["0"] = 999.0
-
-    cerebro.aprender(estado, 1, recompensa=-5.0, proximo_estado=proximo_estado, terminal=True)
-    esperado = 1.0 + cerebro.alpha * ((-5.0 + (cerebro.gamma * 0.0)) - 1.0)
-
-    self.assertAlmostEqual(cerebro._obter_q_estado(estado)["1"], esperado, places=6)
-
-  def test_estado_reduzido_da_fase_1(self):
+  def test_aprender_dispara_update_ppo(self):
     cerebro = _novo_cerebro()
+    estado0 = cerebro.obter_estado(frame=self.frame)
+    acao0 = cerebro.escolher_acao(estado0)
 
-    estado = cerebro.obter_estado(
-      info_personagens={"distancia_norm": 0.2},
-      sinais={
-        "inimigo_atacando": True,
-        "tomou_dano_recente": True,
-      },
-    )
+    frame2 = self.frame.copy()
+    frame2[:, :] = 30
+    estado1 = cerebro.obter_estado(frame=frame2)
+    cerebro.aprender(estado0, acao0, recompensa=1.5, proximo_estado=estado1, terminal=False)
 
-    self.assertEqual(estado, "dist=media|atk_adv=1|dano_rec=1")
+    acao1 = cerebro.escolher_acao(estado1)
+    cerebro.aprender(estado1, acao1, recompensa=-0.5, proximo_estado=None, terminal=True)
 
-  def test_epsilon_respeita_minimo(self):
+    self.assertGreaterEqual(cerebro.obter_debug_rede()["updates"], 1)
+
+  def test_reset_observacao_limpa_stack(self):
     cerebro = _novo_cerebro()
-    cerebro.epsilon = 0.051
-    cerebro.decaimento_epsilon = 0.5
-    cerebro.epsilon_minimo = 0.05
+    estado_a = cerebro.obter_estado(frame=self.frame)
+    cerebro.reset_observacao()
 
-    cerebro.aprender("s", 0, recompensa=0.0, proximo_estado="s2", terminal=False)
-    self.assertGreaterEqual(cerebro.epsilon, cerebro.epsilon_minimo)
-    self.assertAlmostEqual(cerebro.epsilon, 0.05, places=8)
+    frame_b = np.full((360, 640, 3), 180, dtype=np.uint8)
+    estado_b = cerebro.obter_estado(frame=frame_b)
 
-  def test_estado_destreza_usa_distancia_perto(self):
-    cerebro = _novo_cerebro(modo_treino=ModoTreino.DESTREZA, acoes_permitidas=[0, 1])
-
-    estado = cerebro.obter_estado(
-      info_personagens={"distancia_px": 280},
-      sinais={
-        "inimigo_atacando": True,
-        "tomou_dano_recente": False,
-      },
-    )
-
-    self.assertEqual(estado, "dist_perto=1|atk_adv=1|dano_rec=0")
+    self.assertNotAlmostEqual(float(estado_a.mean()), float(estado_b.mean()), places=3)

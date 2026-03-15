@@ -1,23 +1,17 @@
 # Roadmap de Treino (Obrigatorio)
 
 ## Estado atual (ativo no codigo)
-- `Curriculum Learning`: ATIVO
-- Fases disponiveis no menu:
-  - `treino_destreza`
-  - `treino_bloqueio`
-  - `treino_contra_ataque`
-  - `treino_completo`
+- `modelo unico`: `treino_modelo` no menu.
+- Arquitetura: `Pixel 128x128 + stack 4 + CNN + PPO`.
+- Acoes: `esperar`, `destreza`, `defender`, `ataque_leve`, `ataque_medio`.
 
-## Modo por fase
-- `destreza`: acoes `esperar/destreza`, recompensa contextual por distancia e ataque.
-- `bloqueio`: acoes `esperar/bloqueio`, foco em `aparar`.
-- `contra_ataque`: acoes defensivas liberadas + bonus por dano inimigo.
-- `contra_ataque`: inclui `combo` e bonus de `combo apos destreza`.
-- `completo`: todas as mecanicas atuais liberadas.
+## Proximas etapas
+- Melhorar reward shaping para timing de ofensiva/defesa sem overfit.
+- Coletar metricas de estabilidade do PPO (loss, entropia, valor).
+- Adicionar avaliacao automatica por janela de episodios (sobrevivencia e dano).
+- Validar checkpoint/resume em sessoes longas.
 
 ## Regra de implementacao
-- Qualquer nova fase deve definir explicitamente:
-  - acoes permitidas
-  - estado observado
-  - recompensa dedicada
-- Ao alterar uma fase, atualizar este arquivo e adicionar testes dedicados.
+- Toda alteracao de arquitetura deve atualizar este arquivo e os testes.
+- Nao reintroduzir curriculo por fases.
+- Nao reintroduzir macro de combo.

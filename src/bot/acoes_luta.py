@@ -1,9 +1,14 @@
 import os
 import queue
 import threading
-import time
 
-from src.ai.acoes import ACAO_COMBO_SEGURO, ACAO_DEFENDER, ACAO_DESTREZA, ACAO_ESPERAR
+from src.ai.acoes import (
+  ACAO_ATAQUE_LEVE,
+  ACAO_ATAQUE_MEDIO,
+  ACAO_DEFENDER,
+  ACAO_DESTREZA,
+  ACAO_ESPERAR,
+)
 from src.bot.teclado import pressionar, segurar
 
 TECLA_DESTREZA = os.getenv("BOT_TECLA_DESTREZA", "f").strip() or "f"
@@ -12,9 +17,6 @@ TECLA_ATAQUE_LEVE = os.getenv("BOT_TECLA_ATAQUE_LEVE", "j").strip() or "j"
 TECLA_ATAQUE_MEDIO = os.getenv("BOT_TECLA_ATAQUE_MEDIO", "k").strip() or "k"
 
 TEMPO_BLOQUEIO_DEFENSIVO = 0.180
-TEMPO_COMBO_APOS_MEDIO = 0.300
-TEMPO_COMBO_ENTRE_LEVES = 0.200
-TEMPO_COMBO_FINAL = 0.200
 
 _FILA_ACOES = queue.Queue(maxsize=1)
 _WORKER_INICIADO = False
@@ -60,8 +62,12 @@ def _executar_acao_sincrona(acao):
     defender()
     return
 
-  if acao == ACAO_COMBO_SEGURO:
-    combo_seguro()
+  if acao == ACAO_ATAQUE_LEVE:
+    ataque_leve()
+    return
+
+  if acao == ACAO_ATAQUE_MEDIO:
+    ataque_medio()
     return
 
   # FASE 3 (PENDENTE): reativar ACAO_ESPECIAL com validacao de barra.
@@ -105,19 +111,6 @@ def ataque_leve():
 
 def ataque_medio():
   pressionar(TECLA_ATAQUE_MEDIO)
-
-
-def combo_seguro():
-  ataque_medio()
-  time.sleep(TEMPO_COMBO_APOS_MEDIO)
-  ataque_leve()
-  time.sleep(TEMPO_COMBO_ENTRE_LEVES)
-  ataque_leve()
-  time.sleep(TEMPO_COMBO_ENTRE_LEVES)
-  ataque_leve()
-  time.sleep(TEMPO_COMBO_ENTRE_LEVES)
-  destreza()
-  time.sleep(TEMPO_COMBO_FINAL)
 
 
 # FASE 3 (PENDENTE):

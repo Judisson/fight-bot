@@ -1,0 +1,70 @@
+# Migracao Pixel PPO - Base de Referencia
+
+## Artigos analisados
+
+1. Playing Atari with Deep Reinforcement Learning (Mnih et al., 2013)  
+   Link: https://arxiv.org/abs/1312.5602  
+   Relevancia: define aprendizado de controle diretamente de pixels com CNN.
+
+2. Proximal Policy Optimization Algorithms (Schulman et al., 2017)  
+   Link: https://arxiv.org/abs/1707.06347  
+   Relevancia: define PPO com objetivo surrogate e atualizacoes em minibatch por multiplas epocas.
+
+3. Deep Reinforcement Learning for Playing 2.5D Fighting Games (Li et al., 2018)  
+   Link: https://arxiv.org/abs/1805.02070  
+   Relevancia: mostra desafios especificos de jogos de luta (ambiguidade visual e sequencias de acoes).
+
+## Projetos publicos analisados
+
+1. SFighterAI (linyiLYi/street-fighter-ai)  
+   Link: https://github.com/linyiLYi/street-fighter-ai  
+   Relevancia: agente para Street Fighter II com decisao por pixels RGB, usando Gym Retro + Stable-Baselines3.
+
+2. FightLadder (wenzhe-li/FightLadder)  
+   Link: https://github.com/wenzhe-li/FightLadder  
+   Relevancia: benchmark competitivo para Street Fighter II (Gym Retro), com base PPO e variantes multiagente.
+
+## Sintese tecnica para este projeto
+
+- Manter:
+  - observacao por pixel sem estado manual para o policy input;
+  - frame stacking para capturar dinamica temporal curta;
+  - PPO on-policy com clipping e treino por lotes curtos;
+  - logging continuo de treino e checkpoints.
+
+- Evitar:
+  - macro-acao de combo no executor;
+  - multiplos modos de curriculo no menu;
+  - dependencia de estado tabular/discretizado para decisao da politica.
+
+## Backlog arquitetural (ordem recomendada)
+
+1. Base do ambiente de luta
+   - [x] manter loop de partida e deteccao de botoes/menu
+   - [x] manter logica de vida para punicao/recompensa
+   - [x] remover macro de combo
+
+2. Agente Pixel PPO
+   - [x] entrada `128x128`
+   - [x] stack de `4` frames
+   - [x] CNN + cabecas de politica e valor
+   - [x] treino PPO online com buffer de rollout
+
+3. Espaco de acoes
+   - [x] `esperar`
+   - [x] `destreza`
+   - [x] `defender`
+   - [x] `ataque_leve`
+   - [x] `ataque_medio`
+
+4. Debug e observabilidade
+   - [x] overlay da decisao da rede (acao, probs, valor)
+   - [x] metricas PPO (loss policy/value, updates, buffer)
+   - [x] log por episodio em `data/treino_log.jsonl`
+
+5. Hardening de treino (proximos passos)
+   - [ ] adicionar avaliacao periodica sem exploracao (modo deterministico)
+   - [ ] salvar melhor checkpoint por score medio em janela
+   - [ ] incluir early-warning de colapso (entropia muito baixa)
+   - [ ] parametrizar reward weights por arquivo de config
+   - [ ] adicionar teste de regressao para formato de observacao e acao

@@ -5,7 +5,14 @@ from pathlib import Path
 
 import cv2
 
-from src.ai.acoes import ACAO_COMBO_SEGURO, ACAO_DEFENDER, ACAO_DESTREZA, ACAO_ESPERAR
+from src.ai.acoes import (
+  ACAO_ATAQUE_LEVE,
+  ACAO_ATAQUE_MEDIO,
+  ACAO_DEFENDER,
+  ACAO_DESTREZA,
+  ACAO_ESPERAR,
+  nome_acao,
+)
 from src.ai.cerebro import CerebroIA
 from src.ai.deteccao_luta import obter_estado_luta
 from src.ai.modo_treino import obter_acoes_permitidas, resolver_modo_treino
@@ -14,14 +21,13 @@ from src.bot.acoes_luta import executar_acao, obter_acao_em_execucao
 from src.bot.vida import desenhar_info_vida, obter_info_vida
 from src.utils.log import log
 from src.utils.visao_debug import exibir
-from src.visao.personagens import RastreadorPersonagens, desenhar_info_personagens
 
 CAMINHO_LOG_TREINO = Path("data/treino_log.jsonl")
 
 
 class Luta:
 
-  def __init__(self, exibir_debug=True, modo_treino="completo"):
+  def __init__(self, exibir_debug=True, modo_treino="treino"):
     self.exibir_debug = exibir_debug
     self.modo_treino = resolver_modo_treino(modo_treino)
     self.cerebro = CerebroIA(
@@ -57,18 +63,8 @@ class Luta:
     self._frames_dano_recente = 0
     self._frames_esperando_consecutivos = 0
 
-    self.rastreador_personagens = RastreadorPersonagens(
-      usar_yolo=True,
-      caminho_modelo="src/modelos/personagens.pt",
-      somente_yolo=True,
-    )
-
     self._iniciar_metricas_episodio()
     log(f"Modo de treino ativo: {self.modo_treino.value}")
-
-    # FASE 2 (PENDENTE): introduzir sinais de janela segura para combo.
-    # FASE 3 (PENDENTE): voltar com postura ofensiva/defensiva e especial.
-    # ETAPA 2 (PENDENTE): trocar Q-table por DQN mantendo este extrator.
 
   def processar_frame(self, frame):
     estado_luta = obter_estado_luta(frame)
@@ -106,7 +102,7 @@ class Luta:
       }
 
     if not em_luta:
-      self.rastreador_personagens.reset()
+      self.cerebro.reset_observacao()
       self._estado_anterior = None
       self._acao_anterior = None
       self._acao_recompensada_anterior = None
@@ -122,10 +118,10 @@ class Luta:
       }
 
     info_vida = obter_info_vida(frame)
-    info_personagens = self.rastreador_personagens.detectar(frame)
     sinais_estado = self._detectar_sinais_estado(info_vida)
     estado_atual = self.cerebro.obter_estado(
-      info_personagens=info_personagens,
+      frame=frame,
+      info_vida=info_vida,
       sinais=sinais_estado,
     )
 
@@ -143,10 +139,6 @@ class Luta:
         self._acao_anterior == ACAO_DEFENDER
         and self._acao_recompensada_anterior == ACAO_DEFENDER
       )
-      combo_apos_destreza = (
-        self._acao_anterior == ACAO_COMBO_SEGURO
-        and self._acao_recompensada_anterior == ACAO_DESTREZA
-      )
       recompensa, _, info_recompensa = obter_recompensa(
         frame,
         acao_atual=self._acao_anterior,
@@ -161,8 +153,6 @@ class Luta:
         vitoria_detectada=False,
         destreza_consecutiva=destreza_consecutiva,
         bloqueio_consecutivo=bloqueio_consecutivo,
-        combo_apos_destreza=combo_apos_destreza,
-        distancia_px=info_personagens.get("distancia_px") if info_personagens else None,
         modo_treino=self.modo_treino,
         tempo_parado_frames=(
           self._frames_esperando_consecutivos
@@ -172,6 +162,7 @@ class Luta:
       self._acao_recompensada_anterior = self._acao_anterior
       self._ultima_recompensa = recompensa
       self._recompensa_total_episodio += recompensa
+
       if info_recompensa.get("destreza_tentada"):
         self._destreza_tentada_episodio += 1
       if info_recompensa.get("destreza_perfeita"):
@@ -184,12 +175,14 @@ class Luta:
         self._aparar_perfeito_episodio += 1
       if info_recompensa.get("bloqueio_errado"):
         self._bloqueio_errado_episodio += 1
-      if info_recompensa.get("combo_tentado"):
-        self._combo_tentado_episodio += 1
-      if info_recompensa.get("combo_apos_destreza"):
-        self._combo_apos_destreza_episodio += 1
+      if self._acao_anterior == ACAO_ATAQUE_LEVE:
+        self._ataque_leve_tentado_episodio += 1
+      if self._acao_anterior == ACAO_ATAQUE_MEDIO:
+        self._ataque_medio_tentado_episodio += 1
       if info_recompensa.get("tomou_dano"):
         self._dano_tomado_episodio += float(info_recompensa.get("tomou_dano_delta", 0.0))
+      if info_recompensa.get("causou_dano"):
+        self._dano_inimigo_episodio += float(info_recompensa.get("dano_inimigo_delta", 0.0))
 
       self.cerebro.aprender(
         self._estado_anterior,
@@ -213,14 +206,13 @@ class Luta:
 
     if self.exibir_debug:
       frame_debug = desenhar_info_vida(frame.copy(), info_vida)
-      frame_debug = desenhar_info_personagens(frame_debug, info_personagens)
       frame_debug = self._desenhar_evento_debug(frame_debug)
+      frame_debug = self._desenhar_debug_rede(frame_debug)
       exibir(self._preparar_frame_debug(frame_debug))
 
     self._contador_frames += 1
     if (self._contador_frames % self._log_luta_cada) == 0:
-      log("ESTADO:", estado_atual)
-      log("ACAO:", acao_registrada, "RECOMPENSA:", self._ultima_recompensa)
+      log("ACAO:", nome_acao(acao_registrada), f"({acao_registrada})", "RECOMPENSA:", self._ultima_recompensa)
       log(
         "VIDA_VOCE:",
         self._formatar_pct(info_vida["vida_jogador_pct"]),
@@ -268,55 +260,27 @@ class Luta:
       self._mensagem_evento_debug_restante = 20
       return
     if info_recompensa.get("aparar_perfeito"):
-      self._mensagem_evento_debug = "APARAR PERFEITO +6"
+      self._mensagem_evento_debug = "APARAR PERFEITO +3"
       self._mensagem_evento_debug_restante = 20
       return
-    if info_recompensa.get("destreza_quase"):
-      self._mensagem_evento_debug = "DESTREZA QUASE +2"
-      self._mensagem_evento_debug_restante = 20
+    if info_recompensa.get("causou_dano"):
+      self._mensagem_evento_debug = "DANO INIMIGO +"
+      self._mensagem_evento_debug_restante = 16
       return
-    if info_recompensa.get("bloqueio_quase"):
-      self._mensagem_evento_debug = "BLOQUEIO QUASE +2"
-      self._mensagem_evento_debug_restante = 20
-      return
-    if info_recompensa.get("combo_apos_destreza"):
-      self._mensagem_evento_debug = "COMBO POS DESTREZA +4"
-      self._mensagem_evento_debug_restante = 20
-      return
-    if info_recompensa.get("spam_destreza"):
-      self._mensagem_evento_debug = "SPAM DESTREZA -0.5"
-      self._mensagem_evento_debug_restante = 20
-      return
-    if info_recompensa.get("spam_bloqueio"):
-      self._mensagem_evento_debug = "SPAM BLOQUEIO -0.5"
+    if info_recompensa.get("tomou_dano"):
+      self._mensagem_evento_debug = "TOMOU DANO -5"
       self._mensagem_evento_debug_restante = 20
       return
     if info_recompensa.get("destreza_longe_ruim"):
-      self._mensagem_evento_debug = "DESTREZA LONGE -1.5"
+      self._mensagem_evento_debug = "DESTREZA LONGE"
       self._mensagem_evento_debug_restante = 20
       return
-    if info_recompensa.get("tomou_dano"):
-      self._mensagem_evento_debug = "TOMOU DANO"
+    if info_recompensa.get("spam_destreza"):
+      self._mensagem_evento_debug = "SPAM DESTREZA"
       self._mensagem_evento_debug_restante = 20
       return
-    if info_recompensa.get("nao_reagiu_ataque"):
-      self._mensagem_evento_debug = "SEM REACAO -0.2"
-      self._mensagem_evento_debug_restante = 20
-      return
-    if info_recompensa.get("tentou_reagir_ataque"):
-      self._mensagem_evento_debug = "TENTOU REAGIR +0.5"
-      self._mensagem_evento_debug_restante = 20
-      return
-    if info_recompensa.get("sobreviveu_perigo"):
-      self._mensagem_evento_debug = "SOBREVIVEU JANELA PERIGOSA +0.2"
-      self._mensagem_evento_debug_restante = 20
-      return
-    if info_recompensa.get("acao_destreza") and not info_recompensa.get("destreza_perfeita"):
-      self._mensagem_evento_debug = "DESTREZA SEM PERIGO -1"
-      self._mensagem_evento_debug_restante = 20
-      return
-    if info_recompensa.get("acao_bloqueio") and not info_recompensa.get("aparar_perfeito"):
-      self._mensagem_evento_debug = "BLOQUEIO SEM PERIGO -1"
+    if info_recompensa.get("spam_bloqueio"):
+      self._mensagem_evento_debug = "SPAM BLOQUEIO"
       self._mensagem_evento_debug_restante = 20
       return
 
@@ -325,8 +289,9 @@ class Luta:
 
   def _registrar_log_episodio(self, resultado):
     duracao = max(0.0, time.time() - self._episodio_inicio_ts)
+    debug_rede = self.cerebro.obter_debug_rede()
     registro = {
-      "etapa": 1,
+      "modelo": "pixel_cnn_ppo",
       "fase": self.modo_treino.value,
       "episodio": self.episodio,
       "resultado": resultado,
@@ -339,9 +304,12 @@ class Luta:
       "bloqueio_tentado": int(self._bloqueio_tentado_episodio),
       "aparar_perfeito": int(self._aparar_perfeito_episodio),
       "bloqueio_errado": int(self._bloqueio_errado_episodio),
-      "combo_tentado": int(self._combo_tentado_episodio),
-      "combo_apos_destreza": int(self._combo_apos_destreza_episodio),
+      "ataque_leve_tentado": int(self._ataque_leve_tentado_episodio),
+      "ataque_medio_tentado": int(self._ataque_medio_tentado_episodio),
       "dano_tomado": round(self._dano_tomado_episodio, 3),
+      "dano_inimigo": round(self._dano_inimigo_episodio, 3),
+      "ppo_updates": int(debug_rede.get("updates", 0)),
+      "ppo_passos": int(debug_rede.get("passos", 0)),
     }
     try:
       CAMINHO_LOG_TREINO.parent.mkdir(parents=True, exist_ok=True)
@@ -359,9 +327,10 @@ class Luta:
     self._bloqueio_tentado_episodio = 0
     self._aparar_perfeito_episodio = 0
     self._bloqueio_errado_episodio = 0
-    self._combo_tentado_episodio = 0
-    self._combo_apos_destreza_episodio = 0
+    self._ataque_leve_tentado_episodio = 0
+    self._ataque_medio_tentado_episodio = 0
     self._dano_tomado_episodio = 0.0
+    self._dano_inimigo_episodio = 0.0
 
   def _resetar_contexto_pos_episodio(self):
     self.estado = "BUSCANDO_LUTA"
@@ -376,7 +345,7 @@ class Luta:
     self._mensagem_evento_debug_restante = 0
     self._frames_dano_recente = 0
     self._frames_esperando_consecutivos = 0
-    self.rastreador_personagens.reset()
+    self.cerebro.reset_observacao()
     self._iniciar_metricas_episodio()
 
   def _desenhar_evento_debug(self, frame):
@@ -389,10 +358,127 @@ class Luta:
       (20, 108),
       cv2.FONT_HERSHEY_SIMPLEX,
       0.7,
-      (255, 0, 255),
+      (0, 255, 255),
       2,
       cv2.LINE_AA,
     )
+    return frame
+
+  def _desenhar_debug_rede(self, frame):
+    info = self.cerebro.obter_debug_rede()
+    painel_largura = 390
+    painel_altura = 250
+    margem = 10
+    x0 = max(margem, frame.shape[1] - painel_largura - margem)
+    y0 = margem
+    x1 = min(frame.shape[1] - margem, x0 + painel_largura)
+    y1 = min(frame.shape[0] - margem, y0 + painel_altura)
+
+    cv2.rectangle(frame, (x0, y0), (x1, y1), (30, 30, 30), thickness=-1)
+    cv2.rectangle(frame, (x0, y0), (x1, y1), (120, 120, 120), thickness=1)
+
+    cv2.putText(
+      frame,
+      "PPO PIXEL DEBUG",
+      (x0 + 10, y0 + 20),
+      cv2.FONT_HERSHEY_SIMPLEX,
+      0.55,
+      (240, 240, 240),
+      1,
+      cv2.LINE_AA,
+    )
+
+    linha_y = y0 + 42
+    cv2.putText(
+      frame,
+      f"acao: {info.get('acao_nome')} ({info.get('acao')})",
+      (x0 + 10, linha_y),
+      cv2.FONT_HERSHEY_SIMPLEX,
+      0.48,
+      (0, 220, 255),
+      1,
+      cv2.LINE_AA,
+    )
+    linha_y += 20
+    cv2.putText(
+      frame,
+      (
+        f"V(s): {info.get('valor', 0.0):.3f} | "
+        f"H: {info.get('entropia', 0.0):.3f}"
+      ),
+      (x0 + 10, linha_y),
+      cv2.FONT_HERSHEY_SIMPLEX,
+      0.45,
+      (180, 220, 180),
+      1,
+      cv2.LINE_AA,
+    )
+    linha_y += 18
+    cv2.putText(
+      frame,
+      (
+        f"updates: {info.get('updates', 0)} | passos: {info.get('passos', 0)} | "
+        f"buffer: {info.get('buffer', 0)}/{info.get('rollout_size', 0)}"
+      ),
+      (x0 + 10, linha_y),
+      cv2.FONT_HERSHEY_SIMPLEX,
+      0.42,
+      (190, 190, 190),
+      1,
+      cv2.LINE_AA,
+    )
+
+    linha_y += 20
+    cv2.putText(
+      frame,
+      (
+        f"loss pi={info.get('policy_loss', 0.0):.4f} "
+        f"v={info.get('value_loss', 0.0):.4f}"
+      ),
+      (x0 + 10, linha_y),
+      cv2.FONT_HERSHEY_SIMPLEX,
+      0.42,
+      (220, 200, 160),
+      1,
+      cv2.LINE_AA,
+    )
+
+    probs = info.get("probs", {})
+    bar_x = x0 + 10
+    bar_y = linha_y + 20
+    bar_h = 16
+    bar_w_max = max(40, painel_largura - 170)
+
+    for acao, prob in sorted(probs.items(), key=lambda item: int(item[0])):
+      nome = nome_acao(int(acao))
+      cv2.putText(
+        frame,
+        f"{nome[:13]:<13}",
+        (bar_x, bar_y + 12),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.40,
+        (230, 230, 230),
+        1,
+        cv2.LINE_AA,
+      )
+      x_bar = bar_x + 130
+      largura = int(max(0.0, min(1.0, float(prob))) * bar_w_max)
+      cv2.rectangle(frame, (x_bar, bar_y), (x_bar + bar_w_max, bar_y + bar_h), (60, 60, 60), thickness=-1)
+      cv2.rectangle(frame, (x_bar, bar_y), (x_bar + largura, bar_y + bar_h), (0, 180, 255), thickness=-1)
+      cv2.putText(
+        frame,
+        f"{float(prob) * 100.0:5.1f}%",
+        (x_bar + bar_w_max + 6, bar_y + 12),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.38,
+        (220, 220, 220),
+        1,
+        cv2.LINE_AA,
+      )
+      bar_y += 20
+      if bar_y + bar_h >= y1 - 5:
+        break
+
     return frame
 
   def _preparar_frame_debug(self, frame):
