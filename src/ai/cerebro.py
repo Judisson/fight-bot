@@ -1,9 +1,11 @@
 import atexit
 import json
+import os
 import random
 from pathlib import Path
 
 from src.ai.acoes import ACOES_IA
+from src.ai.modo_treino import ModoTreino, resolver_modo_treino
 from src.utils.log import log
 
 CAMINHO_MEMORIA_IA = Path("data/memoria_ia.json")
@@ -11,7 +13,7 @@ CAMINHO_MEMORIA_IA = Path("data/memoria_ia.json")
 
 class CerebroIA:
 
-  def __init__(self):
+  def __init__(self, acoes_permitidas=None, modo_treino=ModoTreino.COMPLETO):
 
     self.epsilon = 1.0
     self.decaimento_epsilon = 0.9995
@@ -20,7 +22,17 @@ class CerebroIA:
     self.alpha = 0.2
     self.gamma = 0.9
 
-    self.acoes = list(ACOES_IA)
+    self.modo_treino = resolver_modo_treino(modo_treino)
+    if acoes_permitidas:
+      self.acoes = [int(acao) for acao in acoes_permitidas]
+    else:
+      self.acoes = list(ACOES_IA)
+
+    try:
+      self._limiar_distancia_perto_px = int(os.getenv("BOT_DISTANCIA_PERTO_PX", "300"))
+    except ValueError:
+      self._limiar_distancia_perto_px = 300
+
     self.tabela_q = {}
 
     self._carregar_memoria()
@@ -124,7 +136,24 @@ class CerebroIA:
       return "x"
     return "1" if bool(valor) else "0"
 
+  def _flag_distancia_perto(self, info_personagens):
+    distancia_px = info_personagens.get("distancia_px")
+    if distancia_px is not None:
+      try:
+        return "1" if float(distancia_px) <= float(self._limiar_distancia_perto_px) else "0"
+      except (TypeError, ValueError):
+        pass
+
+    distancia_norm = info_personagens.get("distancia_norm")
+    if distancia_norm is None:
+      return "x"
+    try:
+      return "1" if float(distancia_norm) <= 0.25 else "0"
+    except (TypeError, ValueError):
+      return "x"
+
   def obter_estado(self, info_vida=None, info_personagens=None, sinais=None):
+    _ = info_vida
     info_personagens = info_personagens or {}
     sinais = sinais or {}
 
@@ -132,15 +161,20 @@ class CerebroIA:
     inimigo_atacando = sinais.get("inimigo_atacando")
     tomou_dano_recente = sinais.get("tomou_dano_recente")
 
-    # ETAPA 1 / FASE 1 (ATIVA): estado reduzido para melhorar revisitacao de
-    # cenarios na Q-table e acelerar aprendizado.
+    if self.modo_treino in (ModoTreino.DESTREZA, ModoTreino.BLOQUEIO):
+      estado = (
+        f"dist_perto={self._flag_distancia_perto(info_personagens)}",
+        f"atk_adv={self._bucket_bool(inimigo_atacando)}",
+        f"dano_rec={self._bucket_bool(tomou_dano_recente)}",
+      )
+      return "|".join(estado)
+
+    # CONTRA_ATAQUE e COMPLETO: estado um pouco mais detalhado.
     estado = (
       f"dist={self._bucket_distancia(distancia_norm)}",
       f"atk_adv={self._bucket_bool(inimigo_atacando)}",
       f"dano_rec={self._bucket_bool(tomou_dano_recente)}",
     )
-    # FASE 2/3 (PENDENTE): reintroduzir sinais de oportunidade ofensiva
-    # (combo/special) apos estabilizar sobrevivencia na Fase 1.
     return "|".join(estado)
 
   def escolher_acao(self, estado):

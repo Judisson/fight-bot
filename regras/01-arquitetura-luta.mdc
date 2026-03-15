@@ -1,7 +1,7 @@
 # Arquitetura de Luta
 
 ## Regra principal
-- `Luta` deve ser independente de modo.
+- `Luta` recebe `modo_treino` e aplica curriculum por fase.
 - `treino` e `arena` apenas capturam frame e chamam `luta.processar_frame(frame)`.
 
 ## Responsabilidades
@@ -18,8 +18,9 @@
 - `postura_tatica=defensivo/agressivo` fica `PENDENTE` para Fase 3.
 
 ## Modo de treino atual
-- Etapa 1/Fase 1 usa estado reduzido e nao deve misturar objetivo de vitoria.
-- Fase 2/3 e Etapa 2 devem permanecer comentadas como `PENDENTE` ate liberacao formal.
+- `destreza`: estado `dist_perto|atk_adv|dano_rec` e acoes `esperar/destreza`.
+- `bloqueio`: estado `dist_perto|atk_adv|dano_rec` e acoes `esperar/bloqueio`.
+- `contra_ataque` e `completo`: estado com bucket de distancia + sinais de ataque/dano.
 
 ## Regra de consistencia de aprendizado
 - So registrar em `_acao_anterior` a acao efetivamente executada.

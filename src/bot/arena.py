@@ -73,7 +73,7 @@ def iniciar_arena(monitor=None):
   log(f"Arena iniciada com FPS alvo: {fps_alvo}")
 
   exibir_debug = os.getenv("BOT_DEBUG", "1").strip() == "1"
-  luta = Luta(exibir_debug=exibir_debug)
+  luta = Luta(exibir_debug=exibir_debug, modo_treino="completo")
   capturador = CapturaAssincrona(monitor)
   capturador.iniciar()
 

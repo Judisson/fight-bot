@@ -5,9 +5,10 @@ from pathlib import Path
 
 import cv2
 
-from src.ai.acoes import ACAO_DESTREZA
+from src.ai.acoes import ACAO_COMBO_SEGURO, ACAO_DEFENDER, ACAO_DESTREZA, ACAO_ESPERAR
 from src.ai.cerebro import CerebroIA
 from src.ai.deteccao_luta import obter_estado_luta
+from src.ai.modo_treino import obter_acoes_permitidas, resolver_modo_treino
 from src.ai.recompensa import PESO_KO, PESO_VITORIA, obter_recompensa
 from src.bot.acoes_luta import executar_acao, obter_acao_em_execucao
 from src.bot.vida import desenhar_info_vida, obter_info_vida
@@ -20,9 +21,13 @@ CAMINHO_LOG_TREINO = Path("data/treino_log.jsonl")
 
 class Luta:
 
-  def __init__(self, exibir_debug=True):
+  def __init__(self, exibir_debug=True, modo_treino="completo"):
     self.exibir_debug = exibir_debug
-    self.cerebro = CerebroIA()
+    self.modo_treino = resolver_modo_treino(modo_treino)
+    self.cerebro = CerebroIA(
+      acoes_permitidas=obter_acoes_permitidas(self.modo_treino),
+      modo_treino=self.modo_treino,
+    )
     self.estado = "BUSCANDO_LUTA"
     self.episodio = 0
     self.vida_jogador_anterior = None
@@ -50,6 +55,7 @@ class Luta:
     self._mensagem_evento_debug = ""
     self._mensagem_evento_debug_restante = 0
     self._frames_dano_recente = 0
+    self._frames_esperando_consecutivos = 0
 
     self.rastreador_personagens = RastreadorPersonagens(
       usar_yolo=True,
@@ -58,6 +64,7 @@ class Luta:
     )
 
     self._iniciar_metricas_episodio()
+    log(f"Modo de treino ativo: {self.modo_treino.value}")
 
     # FASE 2 (PENDENTE): introduzir sinais de janela segura para combo.
     # FASE 3 (PENDENTE): voltar com postura ofensiva/defensiva e especial.
@@ -106,6 +113,7 @@ class Luta:
       self._mensagem_evento_debug = ""
       self._mensagem_evento_debug_restante = 0
       self._frames_dano_recente = 0
+      self._frames_esperando_consecutivos = 0
       if self.exibir_debug:
         exibir(self._preparar_frame_debug(frame))
       return {
@@ -131,6 +139,14 @@ class Luta:
         self._acao_anterior == ACAO_DESTREZA
         and self._acao_recompensada_anterior == ACAO_DESTREZA
       )
+      bloqueio_consecutivo = (
+        self._acao_anterior == ACAO_DEFENDER
+        and self._acao_recompensada_anterior == ACAO_DEFENDER
+      )
+      combo_apos_destreza = (
+        self._acao_anterior == ACAO_COMBO_SEGURO
+        and self._acao_recompensada_anterior == ACAO_DESTREZA
+      )
       recompensa, _, info_recompensa = obter_recompensa(
         frame,
         acao_atual=self._acao_anterior,
@@ -144,13 +160,34 @@ class Luta:
         nocaute_detectado=False,
         vitoria_detectada=False,
         destreza_consecutiva=destreza_consecutiva,
+        bloqueio_consecutivo=bloqueio_consecutivo,
+        combo_apos_destreza=combo_apos_destreza,
         distancia_px=info_personagens.get("distancia_px") if info_personagens else None,
+        modo_treino=self.modo_treino,
+        tempo_parado_frames=(
+          self._frames_esperando_consecutivos
+          if self._acao_anterior == ACAO_ESPERAR else 0
+        ),
       )
       self._acao_recompensada_anterior = self._acao_anterior
       self._ultima_recompensa = recompensa
       self._recompensa_total_episodio += recompensa
+      if info_recompensa.get("destreza_tentada"):
+        self._destreza_tentada_episodio += 1
       if info_recompensa.get("destreza_perfeita"):
-        self._destrezas_perfeitas_episodio += 1
+        self._destreza_perfeita_episodio += 1
+      if info_recompensa.get("destreza_errada"):
+        self._destreza_errada_episodio += 1
+      if info_recompensa.get("bloqueio_tentado"):
+        self._bloqueio_tentado_episodio += 1
+      if info_recompensa.get("aparar_perfeito"):
+        self._aparar_perfeito_episodio += 1
+      if info_recompensa.get("bloqueio_errado"):
+        self._bloqueio_errado_episodio += 1
+      if info_recompensa.get("combo_tentado"):
+        self._combo_tentado_episodio += 1
+      if info_recompensa.get("combo_apos_destreza"):
+        self._combo_apos_destreza_episodio += 1
       if info_recompensa.get("tomou_dano"):
         self._dano_tomado_episodio += float(info_recompensa.get("tomou_dano_delta", 0.0))
 
@@ -169,6 +206,10 @@ class Luta:
 
     self._estado_anterior = estado_atual
     self._acao_anterior = acao_registrada
+    if acao_registrada == ACAO_ESPERAR:
+      self._frames_esperando_consecutivos += 1
+    else:
+      self._frames_esperando_consecutivos = 0
 
     if self.exibir_debug:
       frame_debug = desenhar_info_vida(frame.copy(), info_vida)
@@ -226,12 +267,28 @@ class Luta:
       self._mensagem_evento_debug = "DESTREZA PERFEITA +6"
       self._mensagem_evento_debug_restante = 20
       return
+    if info_recompensa.get("aparar_perfeito"):
+      self._mensagem_evento_debug = "APARAR PERFEITO +6"
+      self._mensagem_evento_debug_restante = 20
+      return
     if info_recompensa.get("destreza_quase"):
       self._mensagem_evento_debug = "DESTREZA QUASE +2"
       self._mensagem_evento_debug_restante = 20
       return
+    if info_recompensa.get("bloqueio_quase"):
+      self._mensagem_evento_debug = "BLOQUEIO QUASE +2"
+      self._mensagem_evento_debug_restante = 20
+      return
+    if info_recompensa.get("combo_apos_destreza"):
+      self._mensagem_evento_debug = "COMBO POS DESTREZA +4"
+      self._mensagem_evento_debug_restante = 20
+      return
     if info_recompensa.get("spam_destreza"):
       self._mensagem_evento_debug = "SPAM DESTREZA -0.5"
+      self._mensagem_evento_debug_restante = 20
+      return
+    if info_recompensa.get("spam_bloqueio"):
+      self._mensagem_evento_debug = "SPAM BLOQUEIO -0.5"
       self._mensagem_evento_debug_restante = 20
       return
     if info_recompensa.get("destreza_longe_ruim"):
@@ -239,7 +296,7 @@ class Luta:
       self._mensagem_evento_debug_restante = 20
       return
     if info_recompensa.get("tomou_dano"):
-      self._mensagem_evento_debug = "TOMOU DANO -4"
+      self._mensagem_evento_debug = "TOMOU DANO"
       self._mensagem_evento_debug_restante = 20
       return
     if info_recompensa.get("nao_reagiu_ataque"):
@@ -258,6 +315,10 @@ class Luta:
       self._mensagem_evento_debug = "DESTREZA SEM PERIGO -1"
       self._mensagem_evento_debug_restante = 20
       return
+    if info_recompensa.get("acao_bloqueio") and not info_recompensa.get("aparar_perfeito"):
+      self._mensagem_evento_debug = "BLOQUEIO SEM PERIGO -1"
+      self._mensagem_evento_debug_restante = 20
+      return
 
     if self._mensagem_evento_debug_restante > 0:
       self._mensagem_evento_debug_restante -= 1
@@ -266,12 +327,20 @@ class Luta:
     duracao = max(0.0, time.time() - self._episodio_inicio_ts)
     registro = {
       "etapa": 1,
-      "fase": 1,
+      "fase": self.modo_treino.value,
       "episodio": self.episodio,
       "resultado": resultado,
       "recompensa_total": round(self._recompensa_total_episodio, 3),
       "duracao_segundos": round(duracao, 3),
-      "destrezas_perfeitas": int(self._destrezas_perfeitas_episodio),
+      "tempo_sobrevivencia": round(duracao, 3),
+      "destreza_tentada": int(self._destreza_tentada_episodio),
+      "destreza_perfeita": int(self._destreza_perfeita_episodio),
+      "destreza_errada": int(self._destreza_errada_episodio),
+      "bloqueio_tentado": int(self._bloqueio_tentado_episodio),
+      "aparar_perfeito": int(self._aparar_perfeito_episodio),
+      "bloqueio_errado": int(self._bloqueio_errado_episodio),
+      "combo_tentado": int(self._combo_tentado_episodio),
+      "combo_apos_destreza": int(self._combo_apos_destreza_episodio),
       "dano_tomado": round(self._dano_tomado_episodio, 3),
     }
     try:
@@ -284,7 +353,14 @@ class Luta:
   def _iniciar_metricas_episodio(self):
     self._episodio_inicio_ts = time.time()
     self._recompensa_total_episodio = 0.0
-    self._destrezas_perfeitas_episodio = 0
+    self._destreza_tentada_episodio = 0
+    self._destreza_perfeita_episodio = 0
+    self._destreza_errada_episodio = 0
+    self._bloqueio_tentado_episodio = 0
+    self._aparar_perfeito_episodio = 0
+    self._bloqueio_errado_episodio = 0
+    self._combo_tentado_episodio = 0
+    self._combo_apos_destreza_episodio = 0
     self._dano_tomado_episodio = 0.0
 
   def _resetar_contexto_pos_episodio(self):
@@ -299,6 +375,7 @@ class Luta:
     self._mensagem_evento_debug = ""
     self._mensagem_evento_debug_restante = 0
     self._frames_dano_recente = 0
+    self._frames_esperando_consecutivos = 0
     self.rastreador_personagens.reset()
     self._iniciar_metricas_episodio()
 

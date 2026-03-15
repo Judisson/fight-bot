@@ -1,17 +1,23 @@
 # Roadmap de Treino (Obrigatorio)
 
 ## Estado atual (ativo no codigo)
-- `Etapa 1 / Fase 1`: ATIVA
-- Objetivo: sobrevivencia e destreza.
-- Estado reduzido: distancia, inimigo_atacando, tomou_dano_recente.
-- Acoes reduzidas: esperar, destreza, defender.
+- `Curriculum Learning`: ATIVO
+- Fases disponiveis no menu:
+  - `treino_destreza`
+  - `treino_bloqueio`
+  - `treino_contra_ataque`
+  - `treino_completo`
 
-## Pendencias obrigatorias (nao esquecer)
-- `Etapa 1 / Fase 2`: PENDENTE
-- `Etapa 1 / Fase 3`: PENDENTE
-- `Etapa 2 (DQN com PyTorch)`: PENDENTE
+## Modo por fase
+- `destreza`: acoes `esperar/destreza`, recompensa contextual por distancia e ataque.
+- `bloqueio`: acoes `esperar/bloqueio`, foco em `aparar`.
+- `contra_ataque`: acoes defensivas liberadas + bonus por dano inimigo.
+- `contra_ataque`: inclui `combo` e bonus de `combo apos destreza`.
+- `completo`: todas as mecanicas atuais liberadas.
 
 ## Regra de implementacao
-- Codigo de fases futuras deve ficar comentado com marcador `PENDENTE`.
-- Nao ativar Fase 2/3 enquanto metricas da Fase 1 nao estiverem estaveis.
-- Ao ativar nova fase, atualizar este arquivo e adicionar testes dedicados.
+- Qualquer nova fase deve definir explicitamente:
+  - acoes permitidas
+  - estado observado
+  - recompensa dedicada
+- Ao alterar uma fase, atualizar este arquivo e adicionar testes dedicados.

@@ -1,14 +1,8 @@
 import os
-import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import cv2
 import numpy as np
-
-_CACHE_TEMPLATES = {}
-_CACHE_TEMPLATES_ESCALADOS = {}
-_CACHE_LOCK = threading.Lock()
-
 
 def _obter_workers_templates():
   valor = os.getenv("BOT_TEMPLATE_THREADS", "").strip()
@@ -108,18 +102,15 @@ def _escalar_roi(roi, escala, largura, altura):
 
 
 def carregar_template(caminho_template):
-  with _CACHE_LOCK:
-    if caminho_template not in _CACHE_TEMPLATES:
-      imagem = cv2.imread(caminho_template, cv2.IMREAD_GRAYSCALE)
-      if imagem is None:
-        try:
-          buffer = np.fromfile(caminho_template, dtype=np.uint8)
-        except OSError:
-          buffer = np.array([], dtype=np.uint8)
-        if buffer.size > 0:
-          imagem = cv2.imdecode(buffer, cv2.IMREAD_GRAYSCALE)
-      _CACHE_TEMPLATES[caminho_template] = imagem
-    return _CACHE_TEMPLATES[caminho_template]
+  imagem = cv2.imread(caminho_template, cv2.IMREAD_GRAYSCALE)
+  if imagem is None:
+    try:
+      buffer = np.fromfile(caminho_template, dtype=np.uint8)
+    except OSError:
+      buffer = np.array([], dtype=np.uint8)
+    if buffer.size > 0:
+      imagem = cv2.imdecode(buffer, cv2.IMREAD_GRAYSCALE)
+  return imagem
 
 
 def _carregar_template_escalado(caminho_template, escala):
@@ -128,11 +119,6 @@ def _carregar_template_escalado(caminho_template, escala):
     return None
   if escala >= 0.999:
     return template
-
-  chave = (caminho_template, round(float(escala), 4))
-  with _CACHE_LOCK:
-    if chave in _CACHE_TEMPLATES_ESCALADOS:
-      return _CACHE_TEMPLATES_ESCALADOS[chave]
 
   altura, largura = template.shape[:2]
   nova_largura = max(1, int(round(largura * escala)))
@@ -145,9 +131,6 @@ def _carregar_template_escalado(caminho_template, escala):
       (nova_largura, nova_altura),
       interpolation=cv2.INTER_AREA,
     )
-
-  with _CACHE_LOCK:
-    _CACHE_TEMPLATES_ESCALADOS[chave] = template_escalado
   return template_escalado
 
 

@@ -9,10 +9,6 @@ from src.bot import visao
 
 class TestVisao(TestCase):
 
-  def setUp(self):
-    visao._CACHE_TEMPLATES.clear()
-    visao._CACHE_TEMPLATES_ESCALADOS.clear()
-
   @patch("src.bot.visao.cv2.imdecode")
   @patch("src.bot.visao.np.fromfile")
   @patch("src.bot.visao.cv2.imread", return_value=None)

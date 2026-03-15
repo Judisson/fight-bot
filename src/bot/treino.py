@@ -69,13 +69,13 @@ def processar_layout_treino(frame, monitor, roi_jogar_novamente):
   return False
 
 
-def iniciar_treino(monitor=None):
+def iniciar_treino(monitor=None, modo_treino="destreza"):
   if monitor is None:
     monitor = obter_monitor_jogo()
 
   fps_alvo = obter_fps_alvo()
   controle_fps = ControleFPS(fps_alvo)
-  log(f"Treino iniciado com FPS alvo: {fps_alvo}")
+  log(f"Treino iniciado com FPS alvo: {fps_alvo} | modo={modo_treino}")
 
   try:
     intervalo_log_fps = max(0.5, float(os.getenv("BOT_LOG_FPS_INTERVALO", "2.0")))
@@ -88,7 +88,7 @@ def iniciar_treino(monitor=None):
   exibir_debug = os.getenv("BOT_DEBUG", "1").strip() == "1"
   roi_jogar_novamente = obter_roi(ROI_JOGAR_NOVAMENTE)
   log(f"ROI jogar_novamente (x1,y1,x2,y2): {roi_jogar_novamente}")
-  luta = Luta(exibir_debug=exibir_debug)
+  luta = Luta(exibir_debug=exibir_debug, modo_treino=modo_treino)
   capturador = CapturaAssincrona(monitor)
   capturador.iniciar()
   modo_reinicio = False

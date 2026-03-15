@@ -4,12 +4,13 @@ from unittest.mock import patch
 
 from src.ai.acoes import ACAO_DEFENDER
 from src.ai.cerebro import CerebroIA
+from src.ai.modo_treino import ModoTreino
 
 
-def _novo_cerebro():
+def _novo_cerebro(modo_treino=ModoTreino.COMPLETO, acoes_permitidas=None):
   with patch("src.ai.cerebro.atexit.register", lambda *_args, **_kwargs: None):
     with patch("src.ai.cerebro.CAMINHO_MEMORIA_IA", Path("data/memoria_ia_test_tmp.json")):
-      return CerebroIA()
+      return CerebroIA(modo_treino=modo_treino, acoes_permitidas=acoes_permitidas)
 
 
 class TestCerebroIA(TestCase):
@@ -71,3 +72,16 @@ class TestCerebroIA(TestCase):
     cerebro.aprender("s", 0, recompensa=0.0, proximo_estado="s2", terminal=False)
     self.assertGreaterEqual(cerebro.epsilon, cerebro.epsilon_minimo)
     self.assertAlmostEqual(cerebro.epsilon, 0.05, places=8)
+
+  def test_estado_destreza_usa_distancia_perto(self):
+    cerebro = _novo_cerebro(modo_treino=ModoTreino.DESTREZA, acoes_permitidas=[0, 1])
+
+    estado = cerebro.obter_estado(
+      info_personagens={"distancia_px": 280},
+      sinais={
+        "inimigo_atacando": True,
+        "tomou_dano_recente": False,
+      },
+    )
+
+    self.assertEqual(estado, "dist_perto=1|atk_adv=1|dano_rec=0")
