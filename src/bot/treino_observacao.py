@@ -20,6 +20,7 @@ from src.bot.controle_fps import ControleFPS, obter_fps_alvo
 from src.bot.captura import CapturaAssincrona
 from src.bot.foco import focar_jogo
 from src.bot.janela_jogo import encontrar_janela, obter_bbox_janela
+from src.bot.rois import ROI_ACOES_PERFEITAS, obter_roi
 from src.bot.vida import obter_info_vida
 from src.bot.visao import encontrar_template
 from src.utils.debug_rede_telas import gerar_tela_perceptron, gerar_tela_pixel
@@ -310,15 +311,27 @@ class ColetorDemonstracao:
         "aparar_perfeito": aparar_perfeito,
       }
 
+    roi_perfeitas = obter_roi(ROI_ACOES_PERFEITAS)
+
     if acao_human == "esquiva":
       destreza_perfeita = (
-        encontrar_template(frame, TEMPLATE_DESTREZA, limiar=self._limiar_destreza) is not None
+        encontrar_template(
+          frame,
+          TEMPLATE_DESTREZA,
+          limiar=self._limiar_destreza,
+          roi=roi_perfeitas,
+        ) is not None
       )
       if destreza_perfeita:
         acao_registrada = "destreza"
     elif acao_human == "bloqueio":
       aparar_perfeito = (
-        encontrar_template(frame, TEMPLATE_APARAR, limiar=self._limiar_aparar) is not None
+        encontrar_template(
+          frame,
+          TEMPLATE_APARAR,
+          limiar=self._limiar_aparar,
+          roi=roi_perfeitas,
+        ) is not None
       )
       if aparar_perfeito:
         acao_registrada = "aparar"
@@ -410,15 +423,15 @@ class ColetorDemonstracao:
     vi1 = vida_depois.get("vida_inimigo_pct")
 
     if vj0 is not None and vj1 is not None and vj1 < vj0:
-      recompensa -= float(vj0 - vj1) * 0.50
+      recompensa -= float(vj0 - vj1) * 2.0
     if vi0 is not None and vi1 is not None and vi1 < vi0:
-      recompensa += float(vi0 - vi1) * 0.40
+      recompensa += float(vi0 - vi1) * 1.5
 
     if done:
       if terminal_label == "vitoria":
         recompensa += 20.0
       elif terminal_label == "ko":
-        recompensa -= 20.0
+        recompensa -= 15.0
 
     return recompensa
 

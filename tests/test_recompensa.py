@@ -1,18 +1,21 @@
 from unittest import TestCase
 from unittest.mock import patch
 
-from src.ai.acoes import ACAO_ATAQUE_LEVE, ACAO_DEFENDER, ACAO_DESTREZA
+from src.ai.acoes import ACAO_ATAQUE_LEVE, ACAO_ATAQUE_PESADO, ACAO_DEFENDER, ACAO_DESTREZA
 from src.ai.recompensa import (
+  PESO_ATAQUE_PESADO_TOMOU_DANO,
   PESO_APARAR_PERFEITO,
+  PESO_DANO_TOMADO_POR_PCT,
   PESO_DANO_INIMIGO_POR_PCT,
   PESO_DESTREZA_PERFEITA,
   PESO_KO,
   PESO_NAO_REAGIU_ATAQUE,
   PESO_SOBREVIVEU_JANELA_PERIGOSA,
   PESO_TENTOU_REAGIR_ATAQUE,
-  PESO_TOMOU_DANO,
   PESO_ATAQUE_EM_PERIGO,
   PESO_VITORIA,
+  PENALIDADE_SEM_COMBO,
+  RECOMPENSA_COMBO_ATIVO,
   obter_recompensa,
 )
 
@@ -54,9 +57,27 @@ class TestRecompensa(TestCase):
       vitoria_detectada=False,
     )
     self.assertFalse(terminal)
-    esperado = PESO_TOMOU_DANO + PESO_NAO_REAGIU_ATAQUE
+    esperado = (5.0 * PESO_DANO_TOMADO_POR_PCT) + PESO_NAO_REAGIU_ATAQUE
     self.assertEqual(recompensa, esperado)
     self.assertTrue(info["tomou_dano"])
+
+  @patch("src.ai.recompensa._detectar_destreza_perfeita", return_value=False)
+  def test_nao_reagiu_so_pune_quando_habilitado(self, _mock_destreza):
+    recompensa, terminal, info = obter_recompensa(
+      frame=None,
+      acao_atual=0,
+      inimigo_atacando=True,
+      aplicar_penalidade_nao_reagiu=False,
+      vida_jogador_atual=70.0,
+      vida_jogador_anterior=75.0,
+      colunas_escuras_jogador_finais=1,
+      nocaute_detectado=False,
+      vitoria_detectada=False,
+    )
+    self.assertFalse(terminal)
+    esperado = 5.0 * PESO_DANO_TOMADO_POR_PCT
+    self.assertEqual(recompensa, esperado)
+    self.assertFalse(info["nao_reagiu_ataque"])
 
   @patch("src.ai.recompensa._detectar_destreza_perfeita", return_value=True)
   def test_destreza_perfeita_pontua_positivo(self, _mock_destreza):
@@ -113,3 +134,61 @@ class TestRecompensa(TestCase):
     esperado = PESO_ATAQUE_EM_PERIGO + PESO_NAO_REAGIU_ATAQUE + PESO_SOBREVIVEU_JANELA_PERIGOSA
     self.assertFalse(terminal)
     self.assertAlmostEqual(recompensa, esperado, places=6)
+
+  @patch("src.ai.recompensa._detectar_combo_ativo", return_value=True)
+  def test_combo_ativo_recompensa_por_tempo(self, _mock_combo):
+    recompensa, terminal, info = obter_recompensa(
+      frame=object(),
+      acao_atual=0,
+      nocaute_detectado=False,
+      vitoria_detectada=False,
+    )
+    self.assertFalse(terminal)
+    self.assertAlmostEqual(recompensa, RECOMPENSA_COMBO_ATIVO, places=6)
+    self.assertTrue(info["combo_ativo"])
+
+  @patch("src.ai.recompensa._detectar_combo_ativo", return_value=False)
+  def test_sem_combo_penaliza_por_tempo(self, _mock_combo):
+    recompensa, terminal, info = obter_recompensa(
+      frame=object(),
+      acao_atual=0,
+      nocaute_detectado=False,
+      vitoria_detectada=False,
+    )
+    self.assertFalse(terminal)
+    self.assertAlmostEqual(recompensa, PENALIDADE_SEM_COMBO, places=6)
+    self.assertFalse(info["combo_ativo"])
+
+  @patch("src.ai.recompensa._detectar_combo_ativo", return_value=True)
+  def test_combo_nao_pontua_quando_desabilitado_no_frame(self, _mock_combo):
+    recompensa, terminal, info = obter_recompensa(
+      frame=object(),
+      acao_atual=0,
+      aplicar_pontuacao_combo=False,
+      nocaute_detectado=False,
+      vitoria_detectada=False,
+    )
+    self.assertFalse(terminal)
+    self.assertAlmostEqual(recompensa, 0.0, places=6)
+    self.assertTrue(info["combo_ativo"])
+
+  def test_pesado_tomou_dano_aplica_penalidade_extra(self):
+    recompensa, terminal, info = obter_recompensa(
+      frame=None,
+      acao_atual=ACAO_ATAQUE_PESADO,
+      inimigo_atacando=True,
+      vida_jogador_atual=70.0,
+      vida_jogador_anterior=75.0,
+      colunas_escuras_jogador_finais=1,
+      nocaute_detectado=False,
+      vitoria_detectada=False,
+    )
+    esperado = (
+      (5.0 * PESO_DANO_TOMADO_POR_PCT)
+      + PESO_ATAQUE_PESADO_TOMOU_DANO
+      + PESO_ATAQUE_EM_PERIGO
+      + PESO_NAO_REAGIU_ATAQUE
+    )
+    self.assertFalse(terminal)
+    self.assertAlmostEqual(recompensa, esperado, places=6)
+    self.assertTrue(info["ataque_pesado_tomou_dano"])

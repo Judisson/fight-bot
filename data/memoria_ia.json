@@ -1,5 +1,0 @@
-{
-  "modelo": "pixel_cnn_ppo",
-  "checkpoint": "data/modelo_pixel_ppo.pt",
-  "observacao": "arquivo informativo para o modelo atual baseado em pixels."
-}

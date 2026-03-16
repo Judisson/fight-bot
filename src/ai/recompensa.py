@@ -9,9 +9,10 @@ from src.ai.acoes import (
 )
 from src.ai.deteccao_luta import TEMPLATE_DERROTA, TEMPLATE_VITORIA
 from src.ai.modo_treino import resolver_modo_treino
+from src.bot.rois import ROI_ACOES_PERFEITAS, ROI_SEQUENCIA_GOLPES, obter_roi
 from src.bot.visao import encontrar_template
 
-PESO_KO = -20.0
+PESO_KO = -15.0
 PESO_VITORIA = 20.0
 
 PESO_DESTREZA_PERFEITA = 6.0
@@ -26,13 +27,18 @@ PESO_BLOQUEIO_QUASE = 1.0
 PESO_BLOQUEIO_SEM_PERIGO = -1.0
 PESO_SPAM_BLOQUEIO = -0.5
 
-PESO_TOMOU_DANO = -5.0
-PESO_DANO_INIMIGO_POR_PCT = 0.40
+PESO_TOMOU_DANO = 0.0  # legado
+PESO_DANO_INIMIGO_POR_PCT = 1.5
+PESO_DANO_TOMADO_POR_PCT = -2.0
 PESO_TENTOU_REAGIR_ATAQUE = 0.5
 PESO_NAO_REAGIU_ATAQUE = -0.2
-PESO_SOBREVIVEU_JANELA_PERIGOSA = 0.2
+PESO_SOBREVIVEU_JANELA_PERIGOSA = 0.5
 PESO_PARADO_MUITO_TEMPO = -0.5
 PESO_ATAQUE_EM_PERIGO = -0.2
+PESO_ATAQUE_PESADO_TOMOU_DANO = -10.0
+
+RECOMPENSA_COMBO_ATIVO = 5.0
+PENALIDADE_SEM_COMBO = -1.0
 
 PESO_BLOQUEIO_PERFEITO = PESO_APARAR_PERFEITO
 
@@ -56,13 +62,29 @@ try:
 except ValueError:
   LIMIAR_APARAR = 0.8
 
+try:
+  LIMIAR_COMBO = float(os.getenv("BOT_LIMIAR_COMBO", "0.8"))
+except ValueError:
+  LIMIAR_COMBO = 0.8
 
 def _detectar_destreza_perfeita(frame):
-  return encontrar_template(frame, "assets/destreza.png", limiar=LIMIAR_DESTREZA) is not None
+  roi = obter_roi(ROI_ACOES_PERFEITAS)
+  return encontrar_template(frame, "assets/destreza.png", limiar=LIMIAR_DESTREZA, roi=roi) is not None
 
 
 def _detectar_aparar_perfeito(frame):
-  return encontrar_template(frame, "assets/aparar.png", limiar=LIMIAR_APARAR) is not None
+  roi = obter_roi(ROI_ACOES_PERFEITAS)
+  return encontrar_template(frame, "assets/aparar.png", limiar=LIMIAR_APARAR, roi=roi) is not None
+
+
+def _detectar_combo_ativo(frame):
+  roi = obter_roi(ROI_SEQUENCIA_GOLPES)
+  return encontrar_template(
+    frame,
+    "assets/sequencia-golpes.png",
+    limiar=LIMIAR_COMBO,
+    roi=roi,
+  ) is not None
 
 
 def _detectar_tomou_dano(vida_jogador_atual, vida_jogador_anterior, colunas_escuras_jogador_finais):
@@ -128,6 +150,11 @@ def _base_info(acao_atual):
     "spam_bloqueio": False,
     "destreza_longe_ruim": False,
     "parado_muito_tempo": False,
+    "combo_ativo": False,
+    "combo_bonus": 0.0,
+    "combo_penalidade": 0.0,
+    "ataque_pesado_tomou_dano": False,
+    "ataque_em_perigo": False,
   }
 
 
@@ -178,8 +205,13 @@ def _recompensa_acao(
       info["bloqueio_errado"] = True
     return recompensa
 
+  if acao_atual == ACAO_ATAQUE_PESADO and tomou_dano:
+    recompensa += PESO_ATAQUE_PESADO_TOMOU_DANO
+    info["ataque_pesado_tomou_dano"] = True
+
   if acao_atual in (ACAO_ATAQUE_LEVE, ACAO_ATAQUE_MEDIO, ACAO_ATAQUE_PESADO) and inimigo_atacando:
     recompensa += PESO_ATAQUE_EM_PERIGO
+    info["ataque_em_perigo"] = True
 
   return recompensa
 
@@ -189,6 +221,7 @@ def _aplicar_eventos_comuns(
   recompensa,
   acao_atual,
   inimigo_atacando,
+  aplicar_penalidade_nao_reagiu,
   tomou_dano,
   destreza_consecutiva,
   bloqueio_consecutivo,
@@ -202,7 +235,7 @@ def _aplicar_eventos_comuns(
     if acao_reacao:
       recompensa += PESO_TENTOU_REAGIR_ATAQUE
       info["tentou_reagir_ataque"] = True
-    else:
+    elif aplicar_penalidade_nao_reagiu:
       recompensa += PESO_NAO_REAGIU_ATAQUE
       info["nao_reagiu_ataque"] = True
 
@@ -229,6 +262,8 @@ def obter_recompensa(
   frame,
   acao_atual=None,
   inimigo_atacando=False,
+  aplicar_penalidade_nao_reagiu=True,
+  aplicar_pontuacao_combo=True,
   vida_jogador_atual=None,
   vida_jogador_anterior=None,
   vida_inimigo_atual=None,
@@ -242,6 +277,7 @@ def obter_recompensa(
   distancia_px=None,
   modo_treino="treino",
   tempo_parado_frames=0,
+  delta_tempo_seg=None,
 ):
   _ = (colunas_escuras_inimigo_finais,)
   _ = resolver_modo_treino(modo_treino)
@@ -275,9 +311,22 @@ def obter_recompensa(
     vida_inimigo_anterior,
   )
 
+  _ = (delta_tempo_seg,)
+
   recompensa = 0.0
+  if frame is not None:
+    combo_ativo = _detectar_combo_ativo(frame)
+    info["combo_ativo"] = bool(combo_ativo)
+    if aplicar_pontuacao_combo:
+      if combo_ativo:
+        recompensa += RECOMPENSA_COMBO_ATIVO
+        info["combo_bonus"] = RECOMPENSA_COMBO_ATIVO
+      else:
+        recompensa += PENALIDADE_SEM_COMBO
+        info["combo_penalidade"] = PENALIDADE_SEM_COMBO
+
   if tomou_dano:
-    recompensa += PESO_TOMOU_DANO
+    recompensa += delta_dano * PESO_DANO_TOMADO_POR_PCT
     info["tomou_dano"] = True
     info["tomou_dano_delta"] = delta_dano
 
@@ -300,6 +349,7 @@ def obter_recompensa(
     recompensa,
     acao_atual,
     bool(inimigo_atacando),
+    bool(aplicar_penalidade_nao_reagiu),
     tomou_dano,
     bool(destreza_consecutiva),
     bool(bloqueio_consecutivo),

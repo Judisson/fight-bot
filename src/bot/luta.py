@@ -17,7 +17,11 @@ from src.ai.acoes import (
 from src.ai.cerebro import CerebroIA
 from src.ai.deteccao_luta import obter_estado_luta
 from src.ai.modo_treino import obter_acoes_permitidas, resolver_modo_treino
-from src.ai.recompensa import PESO_KO, PESO_VITORIA, obter_recompensa
+from src.ai.recompensa import (
+  PESO_KO,
+  PESO_VITORIA,
+  obter_recompensa,
+)
 from src.bot.acoes_luta import executar_acao
 from src.bot.poder import obter_info_poder
 from src.bot.vida import desenhar_info_vida, obter_info_vida
@@ -68,6 +72,39 @@ class Luta:
       self._qtd_filtros_snapshot = max(1, int(os.getenv("BOT_DEBUG_SNAPSHOT_FILTROS", "3")))
     except ValueError:
       self._qtd_filtros_snapshot = 3
+    try:
+      self._log_reward_rt_cada = max(1, int(os.getenv("BOT_LOG_REWARD_RT_CADA", "1")))
+    except ValueError:
+      self._log_reward_rt_cada = 1
+    self._frames_por_tempo = self._ler_int_env("BOT_FRAMES_POR_TEMPO", 4)
+    self._janela_punicao_sem_decisao_tempos = self._ler_int_env(
+      "BOT_PUNICAO_SEM_DECISAO_TEMPOS",
+      4,
+    )
+    self._janela_pontuacao_combo_tempos = self._ler_int_env(
+      "BOT_PONTUACAO_COMBO_TEMPOS",
+      2,
+    )
+    self._janela_punicao_sem_decisao_frames = (
+      self._janela_punicao_sem_decisao_tempos * self._frames_por_tempo
+    )
+    self._janela_pontuacao_combo_frames = (
+      self._janela_pontuacao_combo_tempos * self._frames_por_tempo
+    )
+    # Compatibilidade com envs legadas em frames.
+    valor_legacy_punicao = os.getenv("BOT_PUNICAO_SEM_DECISAO_FRAMES", "").strip()
+    if valor_legacy_punicao:
+      self._janela_punicao_sem_decisao_frames = self._ler_int_env(
+        "BOT_PUNICAO_SEM_DECISAO_FRAMES",
+        self._janela_punicao_sem_decisao_frames,
+      )
+    valor_legacy_combo = os.getenv("BOT_PONTUACAO_COMBO_FRAMES", "").strip()
+    if valor_legacy_combo:
+      self._janela_pontuacao_combo_frames = self._ler_int_env(
+        "BOT_PONTUACAO_COMBO_FRAMES",
+        self._janela_pontuacao_combo_frames,
+      )
+    self._log_reward_rt = os.getenv("BOT_LOG_REWARD_RT", "1").strip() == "1"
     tecla_snapshot = (os.getenv("BOT_DEBUG_SNAPSHOT_KEY", "p").strip() or "p")[0]
     self._tecla_snapshot_filtro = tecla_snapshot.lower()
 
@@ -76,12 +113,32 @@ class Luta:
     self._mensagem_evento_debug_restante = 0
     self._frames_dano_recente = 0
     self._frames_esperando_consecutivos = 0
+    self._frames_ameaca_sem_decisao = 0
+    self._frames_combo_intervalo = 0
+    self._ts_frame_anterior = None
+    self._contador_reward_rt = 0
     self._espera_sem_pause_logada = False
     self._acoes_fila_cheia_episodio = 0
     self._ultimo_status_especial = None
 
     self._iniciar_metricas_episodio()
     log(f"Modo de treino ativo: {self.modo_treino.value}")
+    if self._log_reward_rt:
+      log(f"Logs de recompensa em tempo real ativos (cada={self._log_reward_rt_cada} frame).")
+    log(
+      "Punicao por sem decisao em ameaca:",
+      (
+        f"janela={self._janela_punicao_sem_decisao_tempos} tempos "
+        f"({self._janela_punicao_sem_decisao_frames} frames)"
+      ),
+    )
+    log(
+      "Pontuacao de combo:",
+      (
+        f"janela={self._janela_pontuacao_combo_tempos} tempos "
+        f"({self._janela_pontuacao_combo_frames} frames) (+5/-1)"
+      ),
+    )
     if self.exibir_debug:
       log(
         f"Debug filtro ativo. Pressione '{self._tecla_snapshot_filtro.upper()}' "
@@ -134,6 +191,10 @@ class Luta:
       self._mensagem_evento_debug_restante = 0
       self._frames_dano_recente = 0
       self._frames_esperando_consecutivos = 0
+      self._frames_ameaca_sem_decisao = 0
+      self._frames_combo_intervalo = 0
+      self._ts_frame_anterior = None
+      self._contador_reward_rt = 0
       if self.exibir_debug:
         self._exibir_telas_debug(frame, info_vida=None, status_perceptron="estado=esperando")
       return {
@@ -141,6 +202,7 @@ class Luta:
         "em_luta": False,
       }
 
+    delta_tempo_seg = self._obter_delta_tempo_seg()
     info_vida = obter_info_vida(frame)
     self._registrar_log_especial(frame)
     sinais_estado = self._detectar_sinais_estado(info_vida)
@@ -168,10 +230,18 @@ class Luta:
         self._acao_anterior == ACAO_BLOQUEIO
         and self._acao_recompensada_anterior == ACAO_BLOQUEIO
       )
+      inimigo_atacando_agora = bool(sinais_estado.get("inimigo_atacando"))
+      aplicar_punicao_sem_decisao = self._deve_punir_sem_decisao(
+        inimigo_atacando=inimigo_atacando_agora,
+        acao_recompensada=self._acao_anterior,
+      )
+      aplicar_pontuacao_combo = self._deve_aplicar_pontuacao_combo()
       recompensa, _, info_recompensa = obter_recompensa(
         frame,
         acao_atual=self._acao_anterior,
-        inimigo_atacando=bool(sinais_estado.get("inimigo_atacando")),
+        inimigo_atacando=inimigo_atacando_agora,
+        aplicar_penalidade_nao_reagiu=aplicar_punicao_sem_decisao,
+        aplicar_pontuacao_combo=aplicar_pontuacao_combo,
         vida_jogador_atual=info_vida["vida_jogador_pct"],
         vida_jogador_anterior=self.vida_jogador_anterior,
         vida_inimigo_atual=info_vida["vida_inimigo_pct"],
@@ -187,10 +257,16 @@ class Luta:
           self._frames_esperando_consecutivos
           if self._acao_anterior == ACAO_ESPERAR else 0
         ),
+        delta_tempo_seg=delta_tempo_seg,
       )
       self._acao_recompensada_anterior = self._acao_anterior
       self._ultima_recompensa = recompensa
       self._recompensa_total_episodio += recompensa
+      self._log_recompensa_tempo_real(
+        recompensa=recompensa,
+        info_recompensa=info_recompensa,
+        acao_recompensada=self._acao_anterior,
+      )
 
       if info_recompensa.get("esquiva_tentada"):
         self._esquiva_tentada_episodio += 1
@@ -258,6 +334,65 @@ class Luta:
       "em_luta": True,
     }
 
+  def _log_recompensa_tempo_real(
+    self,
+    recompensa,
+    info_recompensa,
+    acao_recompensada,
+  ):
+    if not self._log_reward_rt:
+      return
+
+    self._contador_reward_rt += 1
+    if (self._contador_reward_rt % self._log_reward_rt_cada) != 0:
+      return
+
+    valor = float(recompensa)
+    if abs(valor) < 1e-9:
+      return
+
+    info = info_recompensa or {}
+    tipo = "GRATIFICACAO" if valor > 0.0 else "PUNICAO"
+    motivo = self._motivo_recompensa_principal(info)
+
+    log(
+      "[REWARD_RT]",
+      tipo,
+      f"acao={nome_acao(acao_recompensada)}",
+      f"motivo={motivo}",
+      f"valor={valor:+.3f}",
+    )
+
+  @staticmethod
+  def _motivo_recompensa_principal(info):
+    if info.get("ataque_pesado_tomou_dano"):
+      return "pesado_tomou_dano"
+    if info.get("destreza_perfeita"):
+      return "destreza_perfeita"
+    if info.get("aparar_perfeito"):
+      return "aparar_perfeito"
+    if info.get("tomou_dano"):
+      return "tomou_dano"
+    if info.get("causou_dano"):
+      return "causou_dano"
+    if float(info.get("combo_bonus", 0.0)) > 0.0:
+      return "combo_mantido"
+    if float(info.get("combo_penalidade", 0.0)) < 0.0:
+      return "combo_perdido"
+    if info.get("ataque_em_perigo"):
+      return "ataque_em_perigo"
+    if info.get("nao_reagiu_ataque"):
+      return "nao_reagiu_ataque"
+    if info.get("tentou_reagir_ataque"):
+      return "reagiu_ataque"
+    if info.get("spam_destreza"):
+      return "spam_destreza"
+    if info.get("spam_bloqueio"):
+      return "spam_bloqueio"
+    if info.get("parado_muito_tempo"):
+      return "parado_muito_tempo"
+    return "ajuste_geral"
+
   def _detectar_sinais_estado(self, info_vida):
     vida_jogador = info_vida.get("vida_jogador_pct")
 
@@ -280,7 +415,35 @@ class Luta:
       "tomou_dano_recente": tomou_dano_recente,
     }
 
+  def _deve_punir_sem_decisao(self, inimigo_atacando, acao_recompensada):
+    if not inimigo_atacando:
+      self._frames_ameaca_sem_decisao = 0
+      return False
+
+    if acao_recompensada in (ACAO_ESQUIVA, ACAO_BLOQUEIO):
+      self._frames_ameaca_sem_decisao = 0
+      return False
+
+    self._frames_ameaca_sem_decisao += 1
+    if self._frames_ameaca_sem_decisao < self._janela_punicao_sem_decisao_frames:
+      return False
+
+    self._frames_ameaca_sem_decisao = 0
+    return True
+
+  def _deve_aplicar_pontuacao_combo(self):
+    self._frames_combo_intervalo += 1
+    if self._frames_combo_intervalo < self._janela_pontuacao_combo_frames:
+      return False
+
+    self._frames_combo_intervalo = 0
+    return True
+
   def _atualizar_evento_debug(self, info_recompensa):
+    if info_recompensa.get("ataque_pesado_tomou_dano"):
+      self._mensagem_evento_debug = "PESADO PUNIDO -10"
+      self._mensagem_evento_debug_restante = 20
+      return
     if info_recompensa.get("destreza_perfeita"):
       self._mensagem_evento_debug = "DESTREZA (ESQUIVA PERFEITA) +6"
       self._mensagem_evento_debug_restante = 20
@@ -294,7 +457,7 @@ class Luta:
       self._mensagem_evento_debug_restante = 16
       return
     if info_recompensa.get("tomou_dano"):
-      self._mensagem_evento_debug = "TOMOU DANO -5"
+      self._mensagem_evento_debug = "TOMOU DANO"
       self._mensagem_evento_debug_restante = 20
       return
     if info_recompensa.get("destreza_longe_ruim"):
@@ -377,6 +540,10 @@ class Luta:
     self._mensagem_evento_debug_restante = 0
     self._frames_dano_recente = 0
     self._frames_esperando_consecutivos = 0
+    self._frames_ameaca_sem_decisao = 0
+    self._frames_combo_intervalo = 0
+    self._ts_frame_anterior = None
+    self._contador_reward_rt = 0
     self._espera_sem_pause_logada = False
     self._ultimo_status_especial = None
     self.cerebro.reset_observacao()
@@ -462,6 +629,23 @@ class Luta:
     if self._debug_downscale <= 1:
       return frame
     return frame[:: self._debug_downscale, :: self._debug_downscale].copy()
+
+  def _obter_delta_tempo_seg(self):
+    agora = time.perf_counter()
+    if self._ts_frame_anterior is None:
+      self._ts_frame_anterior = agora
+      return 1.0 / 60.0
+
+    delta = max(0.0, min(0.25, agora - self._ts_frame_anterior))
+    self._ts_frame_anterior = agora
+    return delta
+
+  @staticmethod
+  def _ler_int_env(nome, padrao):
+    try:
+      return max(1, int(os.getenv(nome, str(padrao))))
+    except ValueError:
+      return int(padrao)
 
   @staticmethod
   def _formatar_pct(valor):

@@ -42,6 +42,14 @@ Snapshot de filtro da CNN:
   - `Debug Pixel` (stack 4x128x128 + frame diff)
   - `Debug Perceptron` (acao, probs, valor, entropia e losses)
 
+Calibracao ROI de acoes perfeitas:
+- no modo `calibracao_roi`, use `N/P` para trocar alvo ate `acoes_perfeitas`
+- ajuste o quadrado com `Q/A/W/S/E/D/R/F`
+- copie o valor com `C` e salve em `BOT_ROI_ACOES_PERFEITAS`
+- essa ROI passa a ser usada para validar `destreza` e `aparar` na recompensa
+- alvo adicional para evolucao futura:
+  - `sequencia_golpes` (template `assets/sequencia-golpes.png`) -> salvar em `BOT_ROI_COMBO_SEM_PERDA`
+
 Dataset de demonstracoes:
 - `data/demonstrations/episode_001.npz`, `episode_002.npz`, ...
 - cada episodio salva:

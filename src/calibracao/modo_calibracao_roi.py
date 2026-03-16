@@ -72,10 +72,26 @@ def _aplicar_tecla_config(tecla, roi, passo):
   return (x1, y1, x2, y2), True
 
 
+def _listar_templates(template_conf):
+  if isinstance(template_conf, (tuple, list)):
+    return [str(t) for t in template_conf if str(t).strip()]
+  if template_conf:
+    return [str(template_conf)]
+  return []
+
+
+def _detectar_template_em_roi(frame, templates, roi):
+  for template in templates:
+    deteccao = encontrar_template(frame, template, limiar=0.8, roi=roi)
+    if deteccao is not None:
+      return deteccao, template
+  return None, None
+
+
 def iniciar_calibracao_roi_jogar_novamente():
   monitor = _obter_monitor_jogo()
 
-  alvos = [nome for nome in ROIS_PADRAO.keys() if obter_template_roi(nome)]
+  alvos = list(ROIS_PADRAO.keys())
   if not alvos:
     log("Nenhum alvo de ROI configurado para calibracao.")
     return
@@ -96,14 +112,17 @@ def iniciar_calibracao_roi_jogar_novamente():
     altura, largura = frame.shape[:2]
 
     alvo = alvos[indice_alvo]
-    template_atual = obter_template_roi(alvo)
+    templates_atuais = _listar_templates(obter_template_roi(alvo))
     env_atual = obter_env_roi(alvo)
 
     roi = _clamp_roi(rois[alvo], largura, altura)
     rois[alvo] = roi
     x1, y1, x2, y2 = roi
 
-    deteccao = encontrar_template(frame, template_atual, limiar=0.8, roi=roi)
+    deteccao = None
+    template_encontrado = None
+    if templates_atuais:
+      deteccao, template_encontrado = _detectar_template_em_roi(frame, templates_atuais, roi)
 
     cor_roi = (0, 255, 255)
     if deteccao is not None:
@@ -143,11 +162,38 @@ def iniciar_calibracao_roi_jogar_novamente():
       cv2.LINE_AA,
     )
 
+    if templates_atuais:
+      nome_templates = ",".join([t.split("/")[-1] for t in templates_atuais])
+      cv2.putText(
+        frame,
+        f"Templates: {nome_templates}",
+        (20, 110),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.52,
+        (255, 255, 255),
+        1,
+        cv2.LINE_AA,
+      )
+    else:
+      cv2.putText(
+        frame,
+        "Template: nao configurado (ROI manual)",
+        (20, 110),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.52,
+        (255, 255, 255),
+        1,
+        cv2.LINE_AA,
+      )
+
     if deteccao is not None:
       cv2.putText(
         frame,
-        f"Match: conf={deteccao['confianca']:.3f}",
-        (20, 110),
+        (
+          f"Match: conf={deteccao['confianca']:.3f} "
+          f"({template_encontrado.split('/')[-1]})"
+        ),
+        (20, 138),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.58,
         (0, 255, 0),
@@ -158,7 +204,7 @@ def iniciar_calibracao_roi_jogar_novamente():
       cv2.putText(
         frame,
         "Match: nao encontrado no ROI",
-        (20, 110),
+        (20, 138),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.58,
         (0, 165, 255),

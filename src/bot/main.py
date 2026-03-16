@@ -18,7 +18,7 @@ MODOS = [
   ("treino", "Menu de treino"),
   ("debug", "Tela simples de debug com YOLO"),
   ("calibracao", "Ajustar posicoes de vida e poder"),
-  ("calibracao_roi", "Calibrar ROI do jogar novamente"),
+  ("calibracao_roi", "Calibrar ROIs de templates"),
 ]
 
 MODOS_TREINO = [

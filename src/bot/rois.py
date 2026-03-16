@@ -3,19 +3,34 @@ import os
 from src.utils.log import log
 
 ROI_JOGAR_NOVAMENTE = "jogar_novamente"
+ROI_ACOES_PERFEITAS = "acoes_perfeitas"
+ROI_SEQUENCIA_GOLPES = "sequencia_golpes"
+# Alias legado para manter compatibilidade com chamadas antigas.
+ROI_COMBO_SEM_PERDA = ROI_SEQUENCIA_GOLPES
 
 # Registro central de ROIs fixos do projeto.
 # Adicione novos ROIs aqui conforme forem calibrados.
 ROIS_PADRAO = {
   ROI_JOGAR_NOVAMENTE: (960, 950, 1215, 1040),
+  # ROI quadrado para deteccao de feedback visual de destreza/aparar.
+  ROI_ACOES_PERFEITAS: (130, 480, 430, 850),
+  # ROI quadrado para leitura futura do estado do combo (sem perder golpes).
+  ROI_SEQUENCIA_GOLPES: (260, 340, 510, 430),
 }
 
 ROIS_ENV = {
   ROI_JOGAR_NOVAMENTE: "BOT_ROI_JOGAR_NOVAMENTE",
+  ROI_ACOES_PERFEITAS: "BOT_ROI_ACOES_PERFEITAS",
+  ROI_SEQUENCIA_GOLPES: "BOT_ROI_COMBO_SEM_PERDA",
 }
 
 ROI_TEMPLATES = {
   ROI_JOGAR_NOVAMENTE: "assets/jogar-novamente-button.png",
+  ROI_ACOES_PERFEITAS: (
+    "assets/destreza.png",
+    "assets/aparar.png",
+  ),
+  ROI_SEQUENCIA_GOLPES: "assets/sequencia-golpes.png",
 }
 
 
