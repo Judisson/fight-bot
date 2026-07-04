@@ -9,22 +9,14 @@ from src.ai.acoes import (
   ACAO_BLOQUEIO,
   ACAO_ESQUIVA,
   ACAO_ESPERAR,
+  ACAO_ESPECIAL,
 )
 from src.bot.teclado import pressionar, segurar
 
 
-def _env_tecla(nome_novo, nome_legado, padrao):
-  valor = os.getenv(nome_novo, "").strip()
-  if valor:
-    return valor
-  valor_legado = os.getenv(nome_legado, "").strip()
-  if valor_legado:
-    return valor_legado
-  return padrao
-
-
-TECLA_ESQUIVA = _env_tecla("BOT_TECLA_ESQUIVA", "BOT_TECLA_DESTREZA", "f")
-TECLA_BLOQUEIO = os.getenv("BOT_TECLA_BLOQUEIO", "space").strip() or "space"
+TECLA_ESQUIVA = os.getenv("BOT_TECLA_ESQUIVA", "f").strip() or "f"
+TECLA_BLOQUEIO = os.getenv("BOT_TECLA_BLOQUEIO", "d").strip() or "d"
+TECLA_ESPECIAL = os.getenv("BOT_TECLA_ESPECIAL", "s").strip() or "s"
 TECLA_ATAQUE_LEVE = os.getenv("BOT_TECLA_ATAQUE_LEVE", "j").strip() or "j"
 TECLA_ATAQUE_MEDIO = os.getenv("BOT_TECLA_ATAQUE_MEDIO", "k").strip() or "k"
 
@@ -90,10 +82,9 @@ def _executar_acao_sincrona(acao):
     ataque_pesado()
     return
 
-  # FASE 3 (PENDENTE): reativar ACAO_ESPECIAL com validacao de barra.
-  # if acao == ACAO_ESPECIAL:
-  #   especial()
-  #   return
+  if acao == ACAO_ESPECIAL:
+    especial()
+    return
 
 
 def executar_acao(acao):
@@ -117,18 +108,8 @@ def esquiva():
   pressionar(TECLA_ESQUIVA)
 
 
-def destreza():
-  # Alias legado para a mesma tecla de esquiva.
-  esquiva()
-
-
 def bloqueio():
   segurar(TECLA_BLOQUEIO, duracao=TEMPO_BLOQUEIO_DEFENSIVO)
-
-
-def defender():
-  # Alias legado de bloqueio.
-  bloqueio()
 
 
 def ataque_leve():
@@ -143,6 +124,5 @@ def ataque_pesado():
   segurar(TECLA_ATAQUE_LEVE, duracao=TEMPO_ATAQUE_PESADO)
 
 
-# FASE 3 (PENDENTE):
-# def especial():
-#   pressionar("d")
+def especial():
+  pressionar(TECLA_ESPECIAL)

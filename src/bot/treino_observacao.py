@@ -13,6 +13,7 @@ from src.ai.acoes import (
   ACAO_ATAQUE_PESADO,
   ACAO_BLOQUEIO,
   ACAO_ESQUIVA,
+  ACAO_ESPECIAL,
 )
 from src.ai.cerebro import CerebroIA
 from src.ai.deteccao_luta import obter_estado_luta
@@ -78,16 +79,6 @@ def _env_float(nome, padrao):
     return float(valor)
   except ValueError:
     return float(padrao)
-
-
-def _env_tecla(nome_novo, nome_legado, padrao):
-  valor = os.getenv(nome_novo, "").strip()
-  if valor:
-    return valor
-  valor_legado = os.getenv(nome_legado, "").strip()
-  if valor_legado:
-    return valor_legado
-  return padrao
 
 
 def _env_int(nome, padrao):
@@ -168,8 +159,9 @@ class ColetorDemonstracao:
     self._log_acoes = os.getenv("BOT_OBS_LOG_ACOES", "1").strip() == "1"
 
   def _carregar_mapeamento_teclas(self):
-    tecla_esquiva = _env_tecla("BOT_TECLA_ESQUIVA", "BOT_TECLA_DESTREZA", "f").lower()
-    tecla_bloqueio = (os.getenv("BOT_TECLA_BLOQUEIO", "space").strip() or "space").lower()
+    tecla_esquiva = (os.getenv("BOT_TECLA_ESQUIVA", "f").strip() or "f").lower()
+    tecla_bloqueio = (os.getenv("BOT_TECLA_BLOQUEIO", "d").strip() or "d").lower()
+    tecla_especial = (os.getenv("BOT_TECLA_ESPECIAL", "s").strip() or "s").lower()
     tecla_ataque_leve = (os.getenv("BOT_TECLA_ATAQUE_LEVE", "j").strip() or "j").lower()
     tecla_ataque_medio = (os.getenv("BOT_TECLA_ATAQUE_MEDIO", "k").strip() or "k").lower()
 
@@ -182,6 +174,11 @@ class ColetorDemonstracao:
       tecla_bloqueio: {
         "acao_human": "bloqueio",
         "acao_id": ACAO_BLOQUEIO,
+        "modo": "press",
+      },
+      tecla_especial: {
+        "acao_human": "especial",
+        "acao_id": ACAO_ESPECIAL,
         "modo": "press",
       },
       tecla_ataque_leve: {
