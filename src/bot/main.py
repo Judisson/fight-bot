@@ -21,9 +21,14 @@ MODOS = [
   ("calibracao_roi", "Calibrar ROIs de templates"),
 ]
 
-MODOS_TREINO = [
-  ("treino_normal", "Treino normal IA Pixel + CNN + PPO"),
-  ("treino_observacao", "Treino observacao (sem interferir)"),
+TIPO_TREINO = [
+  ("treino_normal", "Treino online IA Pixel + CNN + PPO"),
+  ("treino_observacao", "Treino de observacao (sem interferir)"),
+]
+
+FOCO_TREINO = [
+  ("completo", "Treino Completo (Melhorar todas as habilidades)"),
+  ("mecanicas", "Treino de Mecanicas (Focado em habilidades especificas)"),
 ]
 
 
@@ -146,20 +151,29 @@ def main() -> None:
 
       if modo == "treino":
         while True:
-          modo_treino = escolher_com_setas(
+          tipo = escolher_com_setas(
             "Escolha o tipo de treino:",
-            MODOS_TREINO,
+            TIPO_TREINO,
             permitir_voltar=True,
           )
-          if modo_treino is None:
+          if tipo is None:
             break
+            
+          foco = escolher_com_setas(
+            "Escolha o foco do treino:",
+            FOCO_TREINO,
+            permitir_voltar=True,
+          )
+          if foco is None:
+            continue
+            
           limpar_tela()
-          print(f"Iniciando treino: {modo_treino} | FPS alvo: {fps_escolhido}")
+          print(f"Iniciando treino: {tipo} ({foco}) | FPS alvo: {fps_escolhido}")
           print("")
-          if modo_treino == "treino_observacao":
-            iniciar_treino_observacao()
+          if tipo == "treino_observacao":
+            iniciar_treino_observacao(modo_treino=foco)
             return
-          iniciar_treino(modo_treino="treino")
+          iniciar_treino(modo_treino=foco)
           return
         continue
 
@@ -175,7 +189,7 @@ def main() -> None:
         iniciar_debug_simples()
         return
 
-      iniciar_treino(modo_treino="treino")
+      iniciar_treino(modo_treino="completo")
       return
 
 

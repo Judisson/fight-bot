@@ -129,7 +129,8 @@ class _BufferFrames:
 
 class ColetorDemonstracao:
 
-  def __init__(self):
+  def __init__(self, modo_treino="completo"):
+    self.modo_treino = modo_treino
     self._buffer = _BufferFrames()
     self._episodio_idx = self._obter_proximo_indice_episodio()
     self._transicoes = []
@@ -471,6 +472,7 @@ class ColetorDemonstracao:
       destreza_perfeita=destreza_perfeita,
       aparar_perfeito=aparar_perfeito,
       resultado=np.asarray([str(resultado)], dtype="<U16"),
+      modo_treino=np.asarray([str(self.modo_treino)], dtype="<U16"),
     )
 
     total = len(self._transicoes)
@@ -490,13 +492,13 @@ class ColetorDemonstracao:
     return caminho
 
 
-def iniciar_treino_observacao(monitor=None):
+def iniciar_treino_observacao(monitor=None, modo_treino="completo"):
   if monitor is None:
     monitor = obter_monitor_jogo()
 
   fps_alvo = obter_fps_alvo()
   controle_fps = ControleFPS(fps_alvo)
-  log(f"Treino Observacao iniciado | FPS alvo: {fps_alvo}")
+  log(f"Treino Observacao iniciado | FPS alvo: {fps_alvo} | modo={modo_treino}")
   try:
     intervalo_log_fps = max(0.5, float(os.getenv("BOT_LOG_FPS_INTERVALO", "2.0")))
   except ValueError:
@@ -508,7 +510,7 @@ def iniciar_treino_observacao(monitor=None):
     qtd_filtros_snapshot = 3
   if exibir_debug:
     log("Tela debug da rede (perceptron) ativada no treino observacao.")
-    observador_rede = CerebroIA(modo_treino="treino")
+    observador_rede = CerebroIA(modo_treino=modo_treino)
   else:
     log("Tela debug da rede desativada (BOT_DEBUG=0).")
     observador_rede = None
@@ -520,7 +522,7 @@ def iniciar_treino_observacao(monitor=None):
     )
 
   capturador = CapturaAssincrona(monitor)
-  coletor = ColetorDemonstracao()
+  coletor = ColetorDemonstracao(modo_treino=modo_treino)
   coletor.iniciar_listener()
   capturador.iniciar()
 

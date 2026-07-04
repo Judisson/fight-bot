@@ -69,7 +69,7 @@ def processar_layout_treino(frame, monitor, roi_jogar_novamente):
   return False
 
 
-def iniciar_treino(monitor=None, modo_treino="treino"):
+def iniciar_treino(monitor=None, modo_treino="completo"):
   if monitor is None:
     monitor = obter_monitor_jogo()
 
