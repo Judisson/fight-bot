@@ -1,4 +1,4 @@
-﻿# Fight Bot
+# Fight Bot
 
 Bot de luta com visao computacional + IA por reforco em pixel puro.
 
@@ -42,13 +42,46 @@ Snapshot de filtro da CNN:
   - `Debug Pixel` (stack 4x128x128 + frame diff)
   - `Debug Perceptron` (acao, probs, valor, entropia e losses)
 
-Calibracao ROI de acoes perfeitas:
-- no modo `calibracao_roi`, use `N/P` para trocar alvo ate `acoes_perfeitas`
-- ajuste o quadrado com `Q/A/W/S/E/D/R/F`
-- copie o valor com `C` e salve em `BOT_ROI_ACOES_PERFEITAS`
-- essa ROI passa a ser usada para validar `destreza` e `aparar` na recompensa
-- alvo adicional para evolucao futura:
-  - `sequencia_golpes` (template `assets/sequencia-golpes.png`) -> salvar em `BOT_ROI_COMBO_SEM_PERDA`
+## Calibração
+
+O bot depende de calibrações de tela para identificar corretamente os elementos do jogo (barras de vida, poder, especiais e ROIs). Ambas as calibrações podem ser acessadas pelo menu principal:
+```bash
+python -m src.bot.main
+```
+
+### 1. Calibração de Vida e Especial (Modo `calibracao`)
+Selecione a opção **`calibracao`** no menu principal do terminal. Uma janela OpenCV com a imagem do jogo será exibida.
+
+**Controles na Janela:**
+* **Seleção de Alvo:**
+  - Pressione `1`: Focar na calibração de **VIDA** (exibe caixas amarela/verde).
+  - Pressione `4`: Selecionar o pixel do **Especial 1 (E1)** do jogador para calibração.
+  - Pressione `5`: Selecionar o pixel do **Especial 2 (E2)** do jogador para calibração.
+  - Pressione `6`: Selecionar o pixel do **Especial 3 (E3)** do jogador para calibração.
+  - Pressione `7`: Selecionar o pixel do **Especial 1 (E1)** do inimigo para calibração.
+  - Pressione `8`: Selecionar o pixel do **Especial 2 (E2)** do inimigo para calibração.
+  - Pressione `9`: Selecionar o pixel do **Especial 3 (E3)** do inimigo para calibração.
+* **Ajuste de Regiões (Apenas para Vida):**
+  - `Q`/`A` ajusta a coordenada superior (`y_inicio`).
+  - `W`/`S` ajusta a coordenada inferior (`y_fim`).
+  - `E`/`D` ajusta a coordenada esquerda do jogador (`x1_jogador`).
+  - `R`/`F` ajusta a coordenada direita do jogador (`x2_jogador`).
+  - `T`/`G` ajusta o recuo direito do oponente (`offset_direita_inimigo`).
+  - `Y`/`H` ajusta a largura da barra do oponente (`largura_inimigo`).
+* **Calibração de Pixel do Especial (E1, E2, E3):**
+  - Pressione a tecla do nível correspondente (`4`/`5`/`6` para Jogador ou `7`/`8`/`9` para Inimigo).
+  - Posicione o cursor do mouse sobre o pixel na respectiva barra de especial que acende quando aquele nível está cheio e **clique com o botão esquerdo**.
+  - A coordenada e a cor BGR do pixel serão salvas e exibidas em tempo real como um círculo marcador (azul para o jogador, verde para o inimigo).
+* **Salvar e Sair:**
+  - Pressione `P`: Salva todas as configurações em `data/calibracao_vida.json` e `data/calibracao_especial.json`.
+  - Pressione `ESC`: Encerra o modo de calibração sem salvar as alterações temporárias pendentes.
+
+### 2. Calibração de ROIs para Templates (Modo `calibracao_roi`)
+Selecione a opção **`calibracao_roi`** no menu principal.
+- Use `N`/`P` para navegar entre os alvos de ROI (ex: `acoes_perfeitas` para destreza/aparar ou `jogar_novamente` para o botão de restart).
+- Use as teclas `Q/A/W/S/E/D/R/F` para mover e redimensionar a caixa amarela de visualização sobre o elemento correspondente.
+- Pressione `C` para copiar a string formatada da ROI e salve-a na variável de ambiente correspondente (ex: `BOT_ROI_ACOES_PERFEITAS`, `BOT_ROI_JOGAR_NOVAMENTE` ou `BOT_ROI_COMBO_SEM_PERDA` no arquivo `.env`).
+
 
 Dataset de demonstracoes:
 - `data/demonstrations/episode_001.npz`, `episode_002.npz`, ...

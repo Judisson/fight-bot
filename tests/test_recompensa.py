@@ -1,7 +1,7 @@
 from unittest import TestCase
 from unittest.mock import patch
 
-from src.ai.acoes import ACAO_ATAQUE_LEVE, ACAO_ATAQUE_PESADO, ACAO_DEFENDER, ACAO_DESTREZA
+from src.ai.acoes import ACAO_ATAQUE_LEVE, ACAO_ATAQUE_PESADO, ACAO_BLOQUEIO, ACAO_ESQUIVA
 from src.ai.recompensa import (
   PESO_ATAQUE_PESADO_TOMOU_DANO,
   PESO_APARAR_PERFEITO,
@@ -83,7 +83,7 @@ class TestRecompensa(TestCase):
   def test_destreza_perfeita_pontua_positivo(self, _mock_destreza):
     recompensa, terminal, info = obter_recompensa(
       frame=None,
-      acao_atual=ACAO_DESTREZA,
+      acao_atual=ACAO_ESQUIVA,
       inimigo_atacando=True,
       nocaute_detectado=False,
       vitoria_detectada=False,
@@ -97,7 +97,7 @@ class TestRecompensa(TestCase):
   def test_aparar_perfeito_pontua_positivo(self, _mock_aparar):
     recompensa, terminal, info = obter_recompensa(
       frame=None,
-      acao_atual=ACAO_DEFENDER,
+      acao_atual=ACAO_BLOQUEIO,
       inimigo_atacando=True,
       nocaute_detectado=False,
       vitoria_detectada=False,
@@ -192,3 +192,131 @@ class TestRecompensa(TestCase):
     self.assertFalse(terminal)
     self.assertAlmostEqual(recompensa, esperado, places=6)
     self.assertTrue(info["ataque_pesado_tomou_dano"])
+
+  def test_punicao_agressividade_especial_1(self):
+    recompensa_com_e1, _, info_com_e1 = obter_recompensa(
+      frame=None,
+      acao_atual=ACAO_ATAQUE_LEVE,
+      nivel_especial_inimigo=1,
+      nocaute_detectado=False,
+      vitoria_detectada=False,
+    )
+    recompensa_sem_e1, _, info_sem_e1 = obter_recompensa(
+      frame=None,
+      acao_atual=ACAO_ATAQUE_LEVE,
+      nivel_especial_inimigo=None,
+      nocaute_detectado=False,
+      vitoria_detectada=False,
+    )
+    from src.ai.recompensa import PESO_PUNICAO_AGRESSIVIDADE_E1
+    self.assertAlmostEqual(recompensa_com_e1 - recompensa_sem_e1, PESO_PUNICAO_AGRESSIVIDADE_E1, places=6)
+    self.assertTrue(info_com_e1["punicao_agressividade_especial"])
+    self.assertFalse(info_sem_e1["punicao_agressividade_especial"])
+
+  def test_punicao_agressividade_especial_2(self):
+    recompensa_com_e2, _, info_com_e2 = obter_recompensa(
+      frame=None,
+      acao_atual=ACAO_ATAQUE_LEVE,
+      nivel_especial_inimigo=2,
+      nocaute_detectado=False,
+      vitoria_detectada=False,
+    )
+    recompensa_sem_e2, _, info_sem_e2 = obter_recompensa(
+      frame=None,
+      acao_atual=ACAO_ATAQUE_LEVE,
+      nivel_especial_inimigo=None,
+      nocaute_detectado=False,
+      vitoria_detectada=False,
+    )
+    from src.ai.recompensa import PESO_PUNICAO_AGRESSIVIDADE_E2
+    self.assertAlmostEqual(recompensa_com_e2 - recompensa_sem_e2, PESO_PUNICAO_AGRESSIVIDADE_E2, places=6)
+    self.assertTrue(info_com_e2["punicao_agressividade_especial"])
+    self.assertFalse(info_sem_e2["punicao_agressividade_especial"])
+
+  def test_punicao_defesa_sem_especial(self):
+    recompensa_com_e0, _, info_com_e0 = obter_recompensa(
+      frame=None,
+      acao_atual=ACAO_ESQUIVA,
+      nivel_especial_inimigo=0,
+      nocaute_detectado=False,
+      vitoria_detectada=False,
+    )
+    recompensa_sem_e0, _, info_sem_e0 = obter_recompensa(
+      frame=None,
+      acao_atual=ACAO_ESQUIVA,
+      nivel_especial_inimigo=None,
+      nocaute_detectado=False,
+      vitoria_detectada=False,
+    )
+    from src.ai.recompensa import PESO_PUNICAO_DEFESA_SEM_ESPECIAL
+    self.assertAlmostEqual(recompensa_com_e0 - recompensa_sem_e0, PESO_PUNICAO_DEFESA_SEM_ESPECIAL, places=6)
+    self.assertTrue(info_com_e0["punicao_defesa_sem_especial"])
+    self.assertFalse(info_sem_e0["punicao_defesa_sem_especial"])
+
+  def test_punicao_oponente_e3(self):
+    recompensa_com_e3, _, info_com_e3 = obter_recompensa(
+      frame=None,
+      acao_atual=ACAO_ESQUIVA,
+      nivel_especial_inimigo=3,
+      nocaute_detectado=False,
+      vitoria_detectada=False,
+    )
+    recompensa_sem_e3, _, info_sem_e3 = obter_recompensa(
+      frame=None,
+      acao_atual=ACAO_ESQUIVA,
+      nivel_especial_inimigo=None,
+      nocaute_detectado=False,
+      vitoria_detectada=False,
+    )
+    from src.ai.recompensa import PESO_PUNICAO_OPONENTE_E3
+    self.assertAlmostEqual(recompensa_com_e3 - recompensa_sem_e3, PESO_PUNICAO_OPONENTE_E3, places=6)
+    self.assertTrue(info_com_e3["punicao_oponente_e3"])
+    self.assertFalse(info_sem_e3["punicao_oponente_e3"])
+
+  def test_recompensa_oponente_especial_recente(self):
+    # Teste 1: ACAO_BLOQUEIO sem aparo perfeito -> Recompensa +2.0
+    with patch("src.ai.recompensa._detectar_aparar_perfeito", return_value=False):
+      recompensa, _, info = obter_recompensa(
+        frame=None,
+        acao_atual=ACAO_BLOQUEIO,
+        oponente_especial_recente=True,
+        nocaute_detectado=False,
+        vitoria_detectada=False,
+      )
+      self.assertEqual(recompensa, 2.0)
+      self.assertTrue(info["gratificacao_defesa_especial_recente"])
+
+    # Teste 2: ACAO_ESQUIVA sem destreza perfeita -> Recompensa 0.0 (neutra)
+    with patch("src.ai.recompensa._detectar_destreza_perfeita", return_value=False):
+      recompensa, _, info = obter_recompensa(
+        frame=None,
+        acao_atual=ACAO_ESQUIVA,
+        oponente_especial_recente=True,
+        nocaute_detectado=False,
+        vitoria_detectada=False,
+      )
+      self.assertEqual(recompensa, 0.0)
+      self.assertTrue(info["destreza_neutra_especial_recente"])
+
+    # Teste 3: Acao ofensiva (ataque) -> Recompensa -5.0
+    recompensa, _, info = obter_recompensa(
+      frame=None,
+      acao_atual=ACAO_ATAQUE_LEVE,
+      oponente_especial_recente=True,
+      nocaute_detectado=False,
+      vitoria_detectada=False,
+    )
+    self.assertEqual(recompensa, -5.0)
+    self.assertTrue(info["punicao_ofensiva_especial_recente"])
+
+    # Teste 4: Acao de esperar -> Recompensa -2.0
+    from src.ai.acoes import ACAO_ESPERAR
+    recompensa, _, info = obter_recompensa(
+      frame=None,
+      acao_atual=ACAO_ESPERAR,
+      oponente_especial_recente=True,
+      nocaute_detectado=False,
+      vitoria_detectada=False,
+    )
+    self.assertEqual(recompensa, -2.0)
+    self.assertTrue(info["punicao_espera_especial_recente"])

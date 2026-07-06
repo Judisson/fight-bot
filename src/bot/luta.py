@@ -1,6 +1,7 @@
 import json
 import os
 import time
+from collections import deque
 from pathlib import Path
 
 import cv2
@@ -12,11 +13,12 @@ from src.ai.acoes import (
   ACAO_BLOQUEIO,
   ACAO_ESPERAR,
   ACAO_ESQUIVA,
+  ACAO_ESPECIAL,
   nome_acao,
 )
 from src.ai.cerebro import CerebroIA
 from src.ai.deteccao_luta import obter_estado_luta
-from src.ai.modo_treino import obter_acoes_permitidas, resolver_modo_treino
+from src.ai.modo_treino import obter_acoes_permitidas, resolver_modo_treino, ModoTreino
 from src.ai.recompensa import (
   PESO_KO,
   PESO_VITORIA,
@@ -50,11 +52,21 @@ class Luta:
     self.episodio = 0
     self.vida_jogador_anterior = None
     self.vida_inimigo_anterior = None
+    self._especial_jogador_anterior = False
+    self._oponente_tem_especial_anterior = False
+    self._tempo_especial_inimigo_recente = 0.0
+    self._ataques_sem_dano_consecutivos = 0
+    self._consecutive_medios = 0
+    self._consecutive_leves = 0
+    self._combo_hits = 0
+    self._exposto = False
+    self._tempo_exposto = 0.0
 
     self._estado_anterior = None
     self._acao_anterior = None
     self._acao_recompensada_anterior = None
     self._ultima_recompensa = 0.0
+    self._historico_acoes = deque(maxlen=10)
 
     try:
       self._log_luta_cada = max(1, int(os.getenv("BOT_LOG_LUTA_CADA", "30")))
@@ -166,6 +178,8 @@ class Luta:
           terminal_recompensa,
           proximo_estado=None,
           terminal=True,
+          especial_disponivel=self._especial_jogador_anterior,
+          oponente_especial_recente=(self._tempo_especial_inimigo_recente > 0.0),
         )
       self._recompensa_total_episodio += terminal_recompensa
       self.episodio += 1
@@ -204,13 +218,28 @@ class Luta:
 
     delta_tempo_seg = self._obter_delta_tempo_seg()
     info_vida = obter_info_vida(frame)
-    self._registrar_log_especial(frame)
+    info_poder = obter_info_poder(frame, log_segmentos=False)
+    self._registrar_log_especial(info_poder)
     sinais_estado = self._detectar_sinais_estado(info_vida)
     estado_atual = self.cerebro.obter_estado(
       frame=frame,
       info_vida=info_vida,
       sinais=sinais_estado,
     )
+
+    tem_especial = bool(info_poder.get("tem_especial_jogador"))
+    inimigo_tem_especial = bool(info_poder.get("tem_especial_inimigo"))
+
+    # Atualiza o cronômetro do especial recente do inimigo
+    if self._tempo_especial_inimigo_recente > 0.0:
+      self._tempo_especial_inimigo_recente = max(0.0, self._tempo_especial_inimigo_recente - delta_tempo_seg)
+
+    # Detecção de transição: inimigo descarregou o especial
+    if self._oponente_tem_especial_anterior and not inimigo_tem_especial:
+      self._tempo_especial_inimigo_recente = 2.5
+      from src.bot.acoes_luta import limpar_fila_acoes
+      limpar_fila_acoes()
+      log("[ESPECIAL] Inimigo soltou especial! Fila de acoes limpa. Janela defensiva de 2.5s iniciada.")
 
     if self._espera_sem_pause_logada:
       log("[LUTA] pausar-luta-button detectado -> retomando observacao e decisao da IA.")
@@ -258,7 +287,130 @@ class Luta:
           if self._acao_anterior == ACAO_ESPERAR else 0
         ),
         delta_tempo_seg=delta_tempo_seg,
+        historico_acoes=list(self._historico_acoes),
+        nivel_especial_inimigo=info_poder.get("nivel_especial_inimigo"),
+        oponente_especial_recente=(self._tempo_especial_inimigo_recente > 0.0),
       )
+      # --- Atualização do Estado do Combo e Exposição ---
+      causou_dano = bool(info_recompensa.get("causou_dano"))
+      tomou_dano = bool(info_recompensa.get("tomou_dano"))
+      aparar_perfeito = bool(info_recompensa.get("aparar_perfeito"))
+      destreza_perfeita = bool(info_recompensa.get("destreza_perfeita"))
+
+      # --- Bônus Específicos para Modos de Treino Focado ---
+      if self.modo_treino == ModoTreino.APARAR and aparar_perfeito:
+        from src.ai.recompensa import PESO_APARAR_PERFEITO
+        recompensa += PESO_APARAR_PERFEITO
+        info_recompensa["aparar_perfeito_focado"] = True
+        log("[TREINO-APARAR] Bônus de aparo perfeito duplicado!")
+
+      if self.modo_treino == ModoTreino.DESTREZA and destreza_perfeita:
+        from src.ai.recompensa import PESO_DESTREZA_PERFEITA
+        recompensa += PESO_DESTREZA_PERFEITA
+        info_recompensa["destreza_perfeita_focado"] = True
+        log("[TREINO-DESTREZA] Bônus de destreza perfeita duplicado!")
+
+      if self.modo_treino == ModoTreino.COMBO and self._combo_hits >= 4:
+        if self._acao_anterior in (ACAO_ESQUIVA, ACAO_BLOQUEIO):
+          recompensa += 10.0
+          info_recompensa["combo_reset_defensivo"] = True
+          info_recompensa["combo_reset_defensivo_valor"] = 10.0
+          log("[TREINO-COMBO] Bônus de +10.0 por reset defensivo após combo!")
+
+      # Se executou ação de reset, limpa contadores
+      if self._acao_anterior in (ACAO_ESQUIVA, ACAO_BLOQUEIO, ACAO_ESPERAR):
+        self._combo_hits = 0
+        self._consecutive_medios = 0
+        self._consecutive_leves = 0
+
+      # Incrementa hits se causou dano
+      if causou_dano:
+        self._combo_hits += 1
+
+      # Controle de spam de ataques sem dano
+      is_ataque = self._acao_anterior in (ACAO_ATAQUE_LEVE, ACAO_ATAQUE_MEDIO, ACAO_ATAQUE_PESADO, ACAO_ESPECIAL)
+      if is_ataque:
+        if causou_dano:
+          self._ataques_sem_dano_consecutivos = 0
+        else:
+          self._ataques_sem_dano_consecutivos += 1
+      else:
+        self._ataques_sem_dano_consecutivos = 0
+
+      if self._ataques_sem_dano_consecutivos > 2:
+        peso_spam_ataque = -2.0
+        recompensa += peso_spam_ataque
+        info_recompensa["punicao_ataque_sem_dano"] = True
+        info_recompensa["punicao_ataque_sem_dano_valor"] = peso_spam_ataque
+
+      # Contagem de ataques consecutivos
+      if self._acao_anterior == ACAO_ATAQUE_MEDIO:
+        self._consecutive_medios += 1
+        self._consecutive_leves = 0
+      elif self._acao_anterior == ACAO_ATAQUE_LEVE:
+        self._consecutive_leves += 1
+        self._consecutive_medios = 0
+
+      # Condições que ativam Exposição
+      if self._consecutive_medios >= 2:
+        if not self._exposto:
+          log("[COMBO] Exposto por 2 ataques médios consecutivos!")
+        self._exposto = True
+        self._tempo_exposto = 0.0
+
+      if self._consecutive_leves >= 4:
+        if not self._exposto:
+          log("[COMBO] Exposto por 4 ataques leves consecutivos!")
+        self._exposto = True
+        self._tempo_exposto = 0.0
+
+      if self._combo_hits >= 5 and self._acao_anterior in (ACAO_ATAQUE_LEVE, ACAO_ATAQUE_MEDIO, ACAO_ATAQUE_PESADO):
+        if not self._exposto:
+          log(f"[COMBO] Exposto por finalizar o combo de {self._combo_hits} hits!")
+        self._exposto = True
+        self._tempo_exposto = 0.0
+
+      # Condições que desativam Exposição
+      if self._exposto:
+        self._tempo_exposto += delta_tempo_seg
+        if tomou_dano:
+          self._exposto = False
+          self._consecutive_medios = 0
+          self._consecutive_leves = 0
+          self._combo_hits = 0
+          log("[COMBO] Exposição resolvida por tomar dano.")
+        elif aparar_perfeito:
+          self._exposto = False
+          self._consecutive_medios = 0
+          self._consecutive_leves = 0
+          self._combo_hits = 0
+          log("[COMBO] Exposição resolvida por Aparar Perfeito!")
+        elif self._acao_anterior == ACAO_ESQUIVA:
+          self._exposto = False
+          self._consecutive_medios = 0
+          self._consecutive_leves = 0
+          self._combo_hits = 0
+          log("[COMBO] Exposição resolvida por realizar Esquiva.")
+        elif self._tempo_exposto >= 1.5:
+          self._exposto = False
+          self._consecutive_medios = 0
+          self._consecutive_leves = 0
+          self._combo_hits = 0
+          log("[COMBO] Exposição expirada após esperar 1.5s.")
+
+      # Aplica a punição se tomou ação inválida estando exposto
+      if self._exposto:
+        if self._acao_anterior in (ACAO_ATAQUE_LEVE, ACAO_ATAQUE_MEDIO, ACAO_ATAQUE_PESADO, ACAO_ESPECIAL):
+          try:
+            peso_exposicao = float(os.getenv("BOT_PESO_PUNICAO_EXPOSICAO", "-8.00"))
+          except ValueError:
+            peso_exposicao = -8.00
+          
+          recompensa += peso_exposicao
+          info_recompensa["punicao_exposicao"] = True
+          info_recompensa["punicao_exposicao_valor"] = peso_exposicao
+          self._punicoes_exposicao_episodio += 1
+
       self._acao_recompensada_anterior = self._acao_anterior
       self._ultima_recompensa = recompensa
       self._recompensa_total_episodio += recompensa
@@ -299,10 +451,17 @@ class Luta:
         recompensa,
         proximo_estado=estado_atual,
         terminal=False,
+        especial_disponivel=self._especial_jogador_anterior,
+        oponente_especial_recente=(self._tempo_especial_inimigo_recente > 0.0),
       )
       self._atualizar_evento_debug(info_recompensa)
 
-    acao = self.cerebro.escolher_acao(estado_atual)
+    acao = self.cerebro.escolher_acao(
+      estado_atual,
+      especial_disponivel=tem_especial,
+      oponente_tem_especial=inimigo_tem_especial,
+      oponente_especial_recente=(self._tempo_especial_inimigo_recente > 0.0),
+    )
     acao_executada = executar_acao(acao)
     # Evita enviesar treino/metricas repetindo a acao em execucao quando a fila esta cheia.
     # Quando nao executa no frame atual, tratamos como esperar.
@@ -312,6 +471,8 @@ class Luta:
 
     self._estado_anterior = estado_atual
     self._acao_anterior = acao_registrada
+    self._historico_acoes.append(acao_registrada)
+    
     if acao_registrada == ACAO_ESPERAR:
       self._frames_esperando_consecutivos += 1
     else:
@@ -328,6 +489,8 @@ class Luta:
 
     self.vida_jogador_anterior = info_vida["vida_jogador_pct"]
     self.vida_inimigo_anterior = info_vida["vida_inimigo_pct"]
+    self._especial_jogador_anterior = tem_especial
+    self._oponente_tem_especial_anterior = inimigo_tem_especial
 
     return {
       "terminal": None,
@@ -365,6 +528,10 @@ class Luta:
 
   @staticmethod
   def _motivo_recompensa_principal(info):
+    if info.get("combo_reset_defensivo"):
+      return "combo_reset_defensivo"
+    if info.get("punicao_exposicao"):
+      return "punicao_exposicao_combo"
     if info.get("ataque_pesado_tomou_dano"):
       return "pesado_tomou_dano"
     if info.get("destreza_perfeita"):
@@ -391,6 +558,12 @@ class Luta:
       return "spam_bloqueio"
     if info.get("parado_muito_tempo"):
       return "parado_muito_tempo"
+    if info.get("punicao_agressividade_especial"):
+      return "punicao_agressividade_especial"
+    if info.get("punicao_defesa_sem_especial"):
+      return "punicao_defesa_sem_especial"
+    if info.get("punicao_oponente_e3"):
+      return "punicao_oponente_e3"
     return "ajuste_geral"
 
   def _detectar_sinais_estado(self, info_vida):
@@ -440,6 +613,30 @@ class Luta:
     return True
 
   def _atualizar_evento_debug(self, info_recompensa):
+    if info_recompensa.get("punicao_ataque_sem_dano"):
+      self._mensagem_evento_debug = "PUNIDO SPAM ATK"
+      self._mensagem_evento_debug_restante = 20
+      return
+    if info_recompensa.get("punicao_ofensiva_especial_recente"):
+      self._mensagem_evento_debug = "PUNIDO OFENSIVO ESP"
+      self._mensagem_evento_debug_restante = 20
+      return
+    if info_recompensa.get("punicao_espera_especial_recente"):
+      self._mensagem_evento_debug = "PUNIDO ESPERA ESP"
+      self._mensagem_evento_debug_restante = 20
+      return
+    if info_recompensa.get("gratificacao_defesa_especial_recente"):
+      self._mensagem_evento_debug = "DEFESA ESPECIAL +2"
+      self._mensagem_evento_debug_restante = 20
+      return
+    if info_recompensa.get("combo_reset_defensivo"):
+      self._mensagem_evento_debug = "RESET DEFENSIVO +10"
+      self._mensagem_evento_debug_restante = 20
+      return
+    if info_recompensa.get("punicao_exposicao"):
+      self._mensagem_evento_debug = "PUNIDO EXPOSICAO -8"
+      self._mensagem_evento_debug_restante = 20
+      return
     if info_recompensa.get("ataque_pesado_tomou_dano"):
       self._mensagem_evento_debug = "PESADO PUNIDO -10"
       self._mensagem_evento_debug_restante = 20
@@ -472,6 +669,18 @@ class Luta:
       self._mensagem_evento_debug = "SPAM BLOQUEIO"
       self._mensagem_evento_debug_restante = 20
       return
+    if info_recompensa.get("punicao_agressividade_especial"):
+      self._mensagem_evento_debug = "PUNIDO AGRESSIVIDADE"
+      self._mensagem_evento_debug_restante = 20
+      return
+    if info_recompensa.get("punicao_defesa_sem_especial"):
+      self._mensagem_evento_debug = "PUNIDO DEFESA SEM ESP"
+      self._mensagem_evento_debug_restante = 20
+      return
+    if info_recompensa.get("punicao_oponente_e3"):
+      self._mensagem_evento_debug = "PUNIDO OPONENTE E3!"
+      self._mensagem_evento_debug_restante = 20
+      return
 
     if self._mensagem_evento_debug_restante > 0:
       self._mensagem_evento_debug_restante -= 1
@@ -482,6 +691,7 @@ class Luta:
     registro = {
       "modelo": "pixel_cnn_ppo",
       "fase": self.modo_treino.value,
+      "modo_treino": self.modo_treino.value,
       "episodio": self.episodio,
       "resultado": resultado,
       "recompensa_total": round(self._recompensa_total_episodio, 3),
@@ -498,6 +708,7 @@ class Luta:
       "ataque_medio_tentado": int(self._ataque_medio_tentado_episodio),
       "ataque_pesado_tentado": int(self._ataque_pesado_tentado_episodio),
       "acoes_fila_cheia": int(self._acoes_fila_cheia_episodio),
+      "punicoes_exposicao": int(self._punicoes_exposicao_episodio),
       "dano_tomado": round(self._dano_tomado_episodio, 3),
       "dano_inimigo": round(self._dano_inimigo_episodio, 3),
       "ppo_updates": int(debug_rede.get("updates", 0)),
@@ -513,6 +724,9 @@ class Luta:
   def _iniciar_metricas_episodio(self):
     self._episodio_inicio_ts = time.time()
     self._recompensa_total_episodio = 0.0
+    self._tempo_especial_inimigo_recente = 0.0
+    self._ataques_sem_dano_consecutivos = 0
+    self._punicoes_exposicao_episodio = 0
     self._esquiva_tentada_episodio = 0
     self._destreza_tentada_episodio = 0
     self._destreza_perfeita_episodio = 0
@@ -531,10 +745,18 @@ class Luta:
     self.estado = "BUSCANDO_LUTA"
     self.vida_jogador_anterior = None
     self.vida_inimigo_anterior = None
+    self._especial_jogador_anterior = False
+    self._oponente_tem_especial_anterior = False
+    self._consecutive_medios = 0
+    self._consecutive_leves = 0
+    self._combo_hits = 0
+    self._exposto = False
+    self._tempo_exposto = 0.0
     self._estado_anterior = None
     self._acao_anterior = None
     self._acao_recompensada_anterior = None
     self._ultima_recompensa = 0.0
+    self._historico_acoes.clear()
     self._contador_frames = 0
     self._mensagem_evento_debug = ""
     self._mensagem_evento_debug_restante = 0
@@ -604,8 +826,7 @@ class Luta:
       max_filtros=self._qtd_filtros_snapshot,
     )
 
-  def _registrar_log_especial(self, frame):
-    info_poder = obter_info_poder(frame, log_segmentos=False)
+  def _registrar_log_especial(self, info_poder):
     tem_jogador = info_poder.get("tem_especial_jogador")
     tem_inimigo = info_poder.get("tem_especial_inimigo")
 

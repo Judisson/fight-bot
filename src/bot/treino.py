@@ -3,6 +3,8 @@ import os
 import time
 from pathlib import Path
 
+import cv2
+
 from src.bot.acoes import clicar
 from src.bot.controle_fps import ControleFPS, obter_fps_alvo
 from src.bot.captura import CapturaAssincrona
@@ -58,7 +60,9 @@ def processar_layout_treino(frame, monitor, roi_jogar_novamente):
     if not botao:
       continue
 
-    log(f"Botao ({nome_botao}) encontrado no treino.")
+    log(f"Botao ({nome_botao}) encontrado no treino. Focando a janela do jogo...")
+    focar_jogo(TITULO_JOGO)
+    time.sleep(0.2)
     clicar(
       monitor["left"] + botao["x"],
       monitor["top"] + botao["y"],
@@ -107,6 +111,7 @@ def iniciar_treino(monitor=None, modo_treino="completo"):
           continue
 
         if modo_reinicio:
+          cv2.waitKey(1)  # Mantém as janelas do OpenCV responsivas
           if processar_layout_treino(frame, monitor, roi_jogar_novamente):
             modo_reinicio = False
           continue

@@ -97,6 +97,13 @@ def executar_acao(acao):
     return True
   except queue.Full:
     return False
+def limpar_fila_acoes():
+  try:
+    while not _FILA_ACOES.empty():
+      _FILA_ACOES.get_nowait()
+      _FILA_ACOES.task_done()
+  except Exception:
+    pass
 
 
 def obter_acao_em_execucao():

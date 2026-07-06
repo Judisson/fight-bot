@@ -1,15 +1,30 @@
 from enum import Enum
 
-from src.ai.acoes import ACOES_IA
+from src.ai.acoes import (
+  ACAO_ATAQUE_LEVE,
+  ACAO_ATAQUE_MEDIO,
+  ACAO_BLOQUEIO,
+  ACAO_ESPERAR,
+  ACAO_ESQUIVA,
+  ACOES_IA,
+)
 
 
 class ModoTreino(str, Enum):
-  TREINO = "treino"
+  COMPLETO = "completo"
+  APARAR = "aparar"
+  DEFENDER = "defender"
+  COMBO = "combo"
+  DESTREZA = "destreza"
 
 
 _ALIASES_TREINO = {
-  "",
-  "treino",
+  "": ModoTreino.COMPLETO,
+  "completo": ModoTreino.COMPLETO,
+  "aparar": ModoTreino.APARAR,
+  "defender": ModoTreino.DEFENDER,
+  "combo": ModoTreino.COMBO,
+  "destreza": ModoTreino.DESTREZA,
 }
 
 
@@ -18,12 +33,18 @@ def resolver_modo_treino(valor):
     return valor
 
   texto = str(valor or "").strip().lower()
-  if texto in _ALIASES_TREINO:
-    return ModoTreino.TREINO
-
-  return ModoTreino.TREINO
+  return _ALIASES_TREINO.get(texto, ModoTreino.COMPLETO)
 
 
 def obter_acoes_permitidas(modo_treino):
-  _ = resolver_modo_treino(modo_treino)
-  return list(ACOES_IA)
+  modo = resolver_modo_treino(modo_treino)
+  if modo == ModoTreino.APARAR:
+    return [ACAO_ESPERAR, ACAO_BLOQUEIO]
+  elif modo == ModoTreino.DEFENDER:
+    return [ACAO_ESPERAR, ACAO_ESQUIVA, ACAO_BLOQUEIO]
+  elif modo == ModoTreino.DESTREZA:
+    return [ACAO_ESPERAR, ACAO_ESQUIVA]
+  elif modo == ModoTreino.COMBO:
+    return [ACAO_ESPERAR, ACAO_ESQUIVA, ACAO_BLOQUEIO, ACAO_ATAQUE_LEVE, ACAO_ATAQUE_MEDIO]
+  else:
+    return list(ACOES_IA)

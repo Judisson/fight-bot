@@ -3,7 +3,7 @@ from threading import Event
 from unittest import TestCase
 from unittest.mock import patch
 
-from src.ai.acoes import ACAO_DEFENDER, ACAO_DESTREZA, ACAO_ESPERAR
+from src.ai.acoes import ACAO_BLOQUEIO, ACAO_ESQUIVA, ACAO_ESPERAR
 from src.bot.acoes_luta import executar_acao, obter_acao_em_execucao
 
 
@@ -22,9 +22,9 @@ class TestAcoesLuta(TestCase):
 
     mock_executar.side_effect = _fake_execucao
 
-    self.assertTrue(executar_acao(ACAO_DESTREZA))
+    self.assertTrue(executar_acao(ACAO_ESQUIVA))
     self.assertTrue(iniciou.wait(0.5))
-    self.assertEqual(obter_acao_em_execucao(), ACAO_DESTREZA)
+    self.assertEqual(obter_acao_em_execucao(), ACAO_ESQUIVA)
     self.assertTrue(finalizou.wait(0.5))
 
     limite = time.time() + 0.5
@@ -43,10 +43,10 @@ class TestAcoesLuta(TestCase):
 
     mock_executar.side_effect = _fake_execucao
 
-    self.assertTrue(executar_acao(ACAO_DESTREZA))
+    self.assertTrue(executar_acao(ACAO_ESQUIVA))
     self.assertTrue(iniciou.wait(0.5))
-    self.assertTrue(executar_acao(ACAO_DEFENDER))
-    self.assertFalse(executar_acao(ACAO_DEFENDER))
+    self.assertTrue(executar_acao(ACAO_BLOQUEIO))
+    self.assertFalse(executar_acao(ACAO_BLOQUEIO))
 
   def test_esperar_nao_dispara_worker(self):
     self.assertFalse(executar_acao(ACAO_ESPERAR))

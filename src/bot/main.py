@@ -28,7 +28,10 @@ TIPO_TREINO = [
 
 FOCO_TREINO = [
   ("completo", "Treino Completo (Melhorar todas as habilidades)"),
-  ("mecanicas", "Treino de Mecanicas (Focado em habilidades especificas)"),
+  ("aparar", "Só Aparar (Focado em bloquear/aparar ataques inimigos)"),
+  ("defender", "Só Defender (Focado em sobrevivência: bloqueio e esquiva)"),
+  ("combo", "Só Combo (Focado em sequências ofensivas com resets de esquiva/bloqueio)"),
+  ("destreza", "Só Destreza (Focado em esquivar e dar destreza perfeita)"),
 ]
 
 

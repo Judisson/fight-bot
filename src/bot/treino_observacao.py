@@ -26,6 +26,7 @@ from src.bot.vida import obter_info_vida
 from src.bot.visao import encontrar_template
 from src.utils.debug_rede_telas import gerar_tela_perceptron, gerar_tela_pixel
 from src.utils.log import log
+from src.visao.processamento_termico import ProcessadorVisaoTermica
 from src.utils.visao_debug import (
   NOME_JANELA,
   NOME_JANELA_PERCEPTRON,
@@ -106,23 +107,26 @@ class _BufferFrames:
 
   def __init__(self):
     self._stack = deque(maxlen=self.STACK_SIZE)
+    self._processador_visao = ProcessadorVisaoTermica(frame_size=(self.FRAME_SIZE, self.FRAME_SIZE))
+    import os
+    self.frame_skip = max(1, int(os.getenv("BOT_FRAME_SKIP", "4")))
+    self._frame_count = 0
 
   def reset(self):
     self._stack.clear()
+    self._processador_visao.reset()
+    self._frame_count = 0
 
   def observar(self, frame):
-    if frame is None:
-      quadro = np.zeros((self.FRAME_SIZE, self.FRAME_SIZE), dtype=np.float32)
-    else:
-      gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-      red = cv2.resize(gray, (self.FRAME_SIZE, self.FRAME_SIZE), interpolation=cv2.INTER_AREA)
-      quadro = red.astype(np.float32) / 255.0
+    self._frame_count += 1
+    if self._frame_count == 1 or (self._frame_count % self.frame_skip == 0):
+      quadro = self._processador_visao.processar_frame(frame)
 
-    if not self._stack:
-      for _i in range(self.STACK_SIZE):
+      if not self._stack:
+        for _i in range(self.STACK_SIZE):
+          self._stack.append(quadro)
+      else:
         self._stack.append(quadro)
-    else:
-      self._stack.append(quadro)
 
     return np.stack(self._stack, axis=0).astype(np.float32)
 
