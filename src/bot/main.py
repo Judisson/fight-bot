@@ -32,6 +32,7 @@ FOCO_TREINO = [
   ("defender", "Só Defender (Focado em sobrevivência: bloqueio e esquiva)"),
   ("combo", "Só Combo (Focado em sequências ofensivas com resets de esquiva/bloqueio)"),
   ("destreza", "Só Destreza (Focado em esquivar e dar destreza perfeita)"),
+  ("assistido", "Treino Assistido (Você joga e a IA imita e aprende com você)"),
 ]
 
 

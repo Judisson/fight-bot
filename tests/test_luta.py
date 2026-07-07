@@ -34,6 +34,7 @@ class TestLutaComboExposicao(TestCase):
     with patch("src.bot.luta.obter_info_vida") as mock_vida, \
          patch("src.bot.luta.obter_info_poder") as mock_poder, \
          patch("src.bot.luta.obter_recompensa") as mock_rec, \
+         patch("src.bot.luta.obter_acao_ativa", return_value=ACAO_ESPERAR) as mock_ativa, \
          patch("src.bot.luta.executar_acao", return_value=True):
 
       mock_vida.return_value = {
@@ -167,6 +168,27 @@ class TestLutaComboExposicao(TestCase):
         luta.processar_frame(frame)
         self.assertFalse(luta._exposto)
 
+      # ----------------------------------------------------
+      # Teste 8: 2 Ataques Pesados Consecutivos Ativam Exposição
+      # ----------------------------------------------------
+      luta._consecutive_pesados = 0
+      luta._consecutive_medios = 0
+      luta._consecutive_leves = 0
+      luta._exposto = False
+      
+      mock_rec.return_value = (0.0, False, {})
+      luta._estado_anterior = np.zeros((4, 128, 128))
+      luta._acao_anterior = ACAO_ATAQUE_PESADO
+      luta.processar_frame(frame)
+      self.assertEqual(luta._consecutive_pesados, 1)
+      self.assertFalse(luta._exposto)
+
+      luta._estado_anterior = np.zeros((4, 128, 128))
+      luta._acao_anterior = ACAO_ATAQUE_PESADO
+      luta.processar_frame(frame)
+      self.assertEqual(luta._consecutive_pesados, 2)
+      self.assertTrue(luta._exposto) # Ativou exposição!
+
   @patch("src.bot.luta.resolver_modo_treino")
   @patch("src.bot.luta.obter_acoes_permitidas")
   @patch("src.bot.luta.CerebroIA")
@@ -180,6 +202,7 @@ class TestLutaComboExposicao(TestCase):
     with patch("src.bot.luta.obter_info_vida") as mock_vida, \
          patch("src.bot.luta.obter_info_poder") as mock_poder, \
          patch("src.bot.luta.obter_recompensa") as mock_rec, \
+         patch("src.bot.luta.obter_acao_ativa", return_value=ACAO_ESPERAR) as mock_ativa, \
          patch("src.bot.luta.executar_acao", return_value=True):
 
       mock_vida.return_value = {
@@ -196,49 +219,312 @@ class TestLutaComboExposicao(TestCase):
       }
 
       # ----------------------------------------------------
-      # Teste A: APARAR mode doubles parry reward
+      # Teste A: APARAR mode returns exactly 5.0 on parry
       # ----------------------------------------------------
       from src.ai.modo_treino import ModoTreino
-      from src.ai.recompensa import PESO_APARAR_PERFEITO
 
       luta = Luta(exibir_debug=False, modo_treino="aparar")
       luta._log_reward_rt = False
 
       luta._estado_anterior = np.zeros((4, 128, 128))
       luta._acao_anterior = ACAO_BLOQUEIO
-      # obter_recompensa retorna base de 3.0 para parry
-      mock_rec.return_value = (PESO_APARAR_PERFEITO, False, {"aparar_perfeito": True})
+      mock_rec.return_value = (3.0, False, {"aparar_perfeito": True})
       luta.processar_frame(frame)
-      # Recompensa deve ser duplicada: 3.0 + 3.0 = 6.0
-      self.assertAlmostEqual(luta._ultima_recompensa, 2 * PESO_APARAR_PERFEITO)
+      self.assertAlmostEqual(luta._ultima_recompensa, 5.0)
 
       # ----------------------------------------------------
-      # Teste B: DESTREZA mode doubles dodge reward
+      # Teste B: DESTREZA mode returns exactly 6.0 on dodge
       # ----------------------------------------------------
-      from src.ai.recompensa import PESO_DESTREZA_PERFEITA
-
       luta2 = Luta(exibir_debug=False, modo_treino="destreza")
       luta2._log_reward_rt = False
 
       luta2._estado_anterior = np.zeros((4, 128, 128))
       luta2._acao_anterior = ACAO_ESQUIVA
-      # obter_recompensa retorna base de 6.0 para destreza
-      mock_rec.return_value = (PESO_DESTREZA_PERFEITA, False, {"destreza_perfeita": True})
+      mock_rec.return_value = (6.0, False, {"destreza_perfeita": True})
       luta2.processar_frame(frame)
-      # Recompensa deve ser duplicada: 6.0 + 6.0 = 12.0
-      self.assertAlmostEqual(luta2._ultima_recompensa, 2 * PESO_DESTREZA_PERFEITA)
+      self.assertAlmostEqual(luta2._ultima_recompensa, 6.0)
 
       # ----------------------------------------------------
-      # Teste C: COMBO mode gives defensive reset bonus (+10.0)
+      # Teste C: COMBO mode tests (correct reset, intermediate hits, incorrect combo, and block duration)
       # ----------------------------------------------------
       luta3 = Luta(exibir_debug=False, modo_treino="combo")
       luta3._log_reward_rt = False
-      luta3._combo_hits = 4 # já landed 4 hits
+      luta3._combo_hits = 4
 
+      # C.1 Reset Correto
       luta3._estado_anterior = np.zeros((4, 128, 128))
       luta3._acao_anterior = ACAO_ESQUIVA
       mock_rec.return_value = (2.0, False, {})
       luta3.processar_frame(frame)
-      # Recompensa deve incluir o bônus: 2.0 + 10.0 = 12.0
-      self.assertAlmostEqual(luta3._ultima_recompensa, 12.0)
-      self.assertEqual(luta3._combo_hits, 0) # deve ter resetado
+      self.assertAlmostEqual(luta3._ultima_recompensa, 10.0)
+      self.assertEqual(luta3._combo_hits, 0)
+
+      # C.2 Hit Intermediário (Hit 3)
+      luta3._combo_hits = 2
+      luta3._acao_anterior = ACAO_ATAQUE_LEVE
+      mock_rec.return_value = (0.0, False, {"causou_dano": True})
+      luta3.processar_frame(frame)
+      self.assertAlmostEqual(luta3._ultima_recompensa, 1.0)
+      self.assertEqual(luta3._combo_hits, 3)
+
+      # C.3 Hit Finalizador (Hit 4)
+      luta3._combo_hits = 3
+      luta3._acao_anterior = ACAO_ATAQUE_LEVE
+      mock_rec.return_value = (0.0, False, {"causou_dano": True})
+      luta3.processar_frame(frame)
+      self.assertAlmostEqual(luta3._ultima_recompensa, 2.0)
+      self.assertEqual(luta3._combo_hits, 4)
+
+      # C.4 Combo Excedido com acerto (> 4 hits)
+      luta3._combo_hits = 5
+      luta3._acao_anterior = ACAO_ATAQUE_LEVE
+      mock_rec.return_value = (0.0, False, {"causou_dano": True})
+      luta3.processar_frame(frame)
+      self.assertAlmostEqual(luta3._ultima_recompensa, -3.0)
+      self.assertEqual(luta3._combo_hits, 6)
+
+      # C.4b Ataque sem causar dano (falha)
+      luta3._combo_hits = 1
+      luta3._acao_anterior = ACAO_ATAQUE_LEVE
+      mock_rec.return_value = (0.0, False, {})
+      luta3.processar_frame(frame)
+      self.assertAlmostEqual(luta3._ultima_recompensa, -1.5)
+      self.assertEqual(luta3._combo_hits, 1)
+
+      # C.4c Bloqueio com causou_dano (delay de input)
+      luta3._combo_hits = 1
+      luta3._acao_anterior = ACAO_BLOQUEIO
+      mock_rec.return_value = (0.0, False, {"causou_dano": True})
+      luta3.processar_frame(frame)
+      self.assertAlmostEqual(luta3._ultima_recompensa, 0.0)
+      self.assertEqual(luta3._combo_hits, 0)
+
+      # C.4d Reset do combo por tomar dano
+      luta3._combo_hits = 3
+      luta3._acao_anterior = ACAO_ATAQUE_LEVE
+      mock_rec.return_value = (0.0, False, {"tomou_dano": True})
+      luta3.processar_frame(frame)
+      self.assertEqual(luta3._combo_hits, 0)
+
+      # C.5 Bloqueio Prolongado (> 2.5s)
+      luta3b = Luta(exibir_debug=False, modo_treino="combo")
+      luta3b.estado = "LUTANDO"
+      luta3b._log_reward_rt = False
+      luta3b._estado_anterior = np.zeros((4, 128, 128))
+      luta3b._acao_anterior = ACAO_BLOQUEIO
+      luta3b._tempo_bloqueio_combo = 2.6
+      mock_rec.return_value = (0.0, False, {})
+      luta3b.processar_frame(frame)
+      self.assertAlmostEqual(luta3b._ultima_recompensa, -1.5)
+
+      # C.6 Excesso de ativações de bloqueio/esquiva independentes (3 ativações sem causar dano)
+      luta3c = Luta(exibir_debug=False, modo_treino="combo")
+      luta3c.estado = "LUTANDO"
+      luta3c._log_reward_rt = False
+      luta3c._estado_anterior = np.zeros((4, 128, 128))
+      mock_rec.return_value = (0.0, False, {})
+      
+      # Ativação 1 (Esquiva)
+      luta3c._acao_anterior = ACAO_ESQUIVA
+      luta3c.processar_frame(frame)
+      self.assertEqual(luta3c._esquivas_no_combo, 1)
+      self.assertEqual(luta3c._bloqueios_no_combo, 0)
+      
+      # Espera (limpa flag)
+      luta3c._acao_anterior = ACAO_ESPERAR
+      luta3c.processar_frame(frame)
+      
+      # Ativação 2 (Bloqueio)
+      luta3c._acao_anterior = ACAO_BLOQUEIO
+      luta3c.processar_frame(frame)
+      self.assertEqual(luta3c._esquivas_no_combo, 1)
+      self.assertEqual(luta3c._bloqueios_no_combo, 1)
+
+      # Espera
+      luta3c._acao_anterior = ACAO_ESPERAR
+      luta3c.processar_frame(frame)
+
+      # Bloqueio 2
+      luta3c._acao_anterior = ACAO_BLOQUEIO
+      luta3c.processar_frame(frame)
+      # Espera
+      luta3c._acao_anterior = ACAO_ESPERAR
+      luta3c.processar_frame(frame)
+
+      # Bloqueio 3 (atinge limite de 3) -> Deve punir!
+      luta3c._acao_anterior = ACAO_BLOQUEIO
+      luta3c.processar_frame(frame)
+      self.assertEqual(luta3c._bloqueios_no_combo, 3)
+      self.assertAlmostEqual(luta3c._ultima_recompensa, -3.0)
+
+      # No próximo frame, ACAO_BLOQUEIO deve estar mascarada, mas ACAO_ESQUIVA não!
+      # E a recompensa deve ser 0.0 (não repete a punição de -3.0)
+      luta3c.processar_frame(frame)
+      self.assertAlmostEqual(luta3c._ultima_recompensa, 0.0)
+      self.assertIn(ACAO_ESQUIVA, luta3c.cerebro.acoes_permitidas)
+      self.assertNotIn(ACAO_BLOQUEIO, luta3c.cerebro.acoes_permitidas)
+
+      # Causar dano reseta ambos os contadores e reabilita tudo
+      mock_rec.return_value = (0.0, False, {"causou_dano": True})
+      luta3c._acao_anterior = ACAO_ATAQUE_LEVE
+      luta3c.processar_frame(frame)
+      self.assertEqual(luta3c._bloqueios_no_combo, 0)
+      self.assertEqual(luta3c._esquivas_no_combo, 0)
+      
+      mock_rec.return_value = (0.0, False, {})
+      luta3c.processar_frame(frame)
+      self.assertIn(ACAO_BLOQUEIO, luta3c.cerebro.acoes_permitidas)
+      self.assertIn(ACAO_ESQUIVA, luta3c.cerebro.acoes_permitidas)
+
+      # C.7 Cooldown de ataques no modo COMBO
+      luta3d = Luta(exibir_debug=False, modo_treino="combo")
+      luta3d.estado = "LUTANDO"
+      luta3d._log_reward_rt = False
+      luta3d._estado_anterior = np.zeros((4, 128, 128))
+      mock_rec.return_value = (0.0, False, {})
+      
+      # Força o tempo inicial do cooldown
+      import time as pytime
+      luta3d._ultimo_ataque_ts = pytime.time()
+      
+      # Como o cooldown está ativo, as ações de ataque devem ser mascaradas
+      luta3d.processar_frame(frame)
+      self.assertEqual(luta3d.cerebro.acoes_permitidas, [ACAO_ESPERAR, ACAO_ESQUIVA, ACAO_BLOQUEIO])
+      
+      # Força a expiração do cooldown
+      luta3d._ultimo_ataque_ts = pytime.time() - 0.4
+      luta3d.processar_frame(frame)
+      self.assertEqual(luta3d.cerebro.acoes_permitidas, [ACAO_ESPERAR, ACAO_ESQUIVA, ACAO_BLOQUEIO, ACAO_ATAQUE_LEVE, ACAO_ATAQUE_MEDIO])
+
+      # ----------------------------------------------------
+      # Teste D: DEFENDER mode returns +5.0 on mitigation
+      # ----------------------------------------------------
+      luta4 = Luta(exibir_debug=False, modo_treino="defender")
+      luta4._log_reward_rt = False
+
+      luta4._estado_anterior = np.zeros((4, 128, 128))
+      luta4._acao_anterior = ACAO_BLOQUEIO
+      mock_rec.return_value = (0.0, False, {"tomou_dano": True})
+      luta4.processar_frame(frame)
+      self.assertAlmostEqual(luta4._ultima_recompensa, 5.0)
+
+      # ----------------------------------------------------
+      # Teste E: Bloqueio de Acoes ao Tomar Dano (Hitstun & Dano Recente)
+      # ----------------------------------------------------
+      luta5 = Luta(exibir_debug=False, modo_treino="completo")
+      luta5.estado = "LUTANDO"
+      luta5._log_reward_rt = False
+      luta5.vida_jogador_anterior = 100.0
+
+      # Simula frame onde jogador toma dano (vida cai de 100 para 95 e colunas escuras >= 1)
+      mock_vida.return_value = {
+        "vida_jogador_pct": 95.0,
+        "vida_inimigo_pct": 100.0,
+        "colunas_escuras_jogador_finais": 1,
+        "colunas_escuras_inimigo_finais": 0,
+      }
+
+      # Ao processar o frame, a vida diminui e o bloqueio de dano deve ser ativado (valor padrao de 2 frames)
+      # Frame 1: Dano detectado. _frames_bloqueio_dano vira 2, decrementado para 1.
+      luta5.processar_frame(frame)
+      self.assertEqual(luta5._frames_bloqueio_dano, 1)
+      self.assertEqual(luta5.cerebro.acoes_permitidas, [ACAO_ESPERAR]) # Apenas ACAO_ESPERAR permitida
+
+      # Frame 2: Ainda sob bloqueio absoluto. _frames_bloqueio_dano vira 0.
+      mock_vida.return_value = {
+        "vida_jogador_pct": 95.0,
+        "vida_inimigo_pct": 100.0,
+        "colunas_escuras_jogador_finais": 1,
+        "colunas_escuras_inimigo_finais": 0,
+      }
+      luta5.vida_jogador_anterior = 95.0 # Nao mudou a vida de novo
+      luta5.processar_frame(frame)
+      self.assertEqual(luta5._frames_bloqueio_dano, 0)
+      self.assertEqual(luta5.cerebro.acoes_permitidas, [ACAO_ESPERAR])
+
+      # Frame 3: Bloqueio absoluto expirou, mas tomou_dano_recente ainda e True.
+      # Acoes de ataque devem ser removidas, permitindo apenas esquiva, bloqueio e esperar.
+      luta5.processar_frame(frame)
+      self.assertEqual(luta5._frames_bloqueio_dano, 0)
+      self.assertTrue(luta5._frames_dano_recente > 0) # Ainda sob dano recente
+      self.assertIn(ACAO_ESQUIVA, luta5.cerebro.acoes_permitidas)
+      self.assertIn(ACAO_BLOQUEIO, luta5.cerebro.acoes_permitidas)
+      self.assertNotIn(ACAO_ATAQUE_LEVE, luta5.cerebro.acoes_permitidas)
+      self.assertNotIn(ACAO_ATAQUE_MEDIO, luta5.cerebro.acoes_permitidas)
+      self.assertNotIn(ACAO_ATAQUE_PESADO, luta5.cerebro.acoes_permitidas)
+      self.assertNotIn(ACAO_ESPECIAL, luta5.cerebro.acoes_permitidas)
+
+      # Avancamos os frames ate a expiracao de _frames_dano_recente (originalmente 8 frames)
+      # Ja se passaram 3 frames. Restam 5 frames para expirar.
+      for _ in range(5):
+        luta5.processar_frame(frame)
+
+      # Frame 9: O dano recente expirou (_frames_dano_recente = 0).
+      # Todas as acoes do modo completo devem ser liberadas de novo (incluindo ataques).
+      luta5.processar_frame(frame)
+      self.assertEqual(luta5._frames_dano_recente, 0)
+      self.assertIn(ACAO_ATAQUE_PESADO, luta5.cerebro.acoes_permitidas)
+      self.assertIn(ACAO_ATAQUE_LEVE, luta5.cerebro.acoes_permitidas)
+      self.assertGreater(len(luta5.cerebro.acoes_permitidas), 3)
+
+      # ----------------------------------------------------
+      # Teste F: Bypass de Acao Ativa (Worker Ocupado)
+      # ----------------------------------------------------
+      luta6 = Luta(exibir_debug=False, modo_treino="completo")
+      luta6.estado = "LUTANDO"
+      luta6._log_reward_rt = False
+      
+      # Simula worker ocupado executando ACAO_BLOQUEIO
+      mock_ativa.return_value = ACAO_BLOQUEIO
+      luta6._estado_anterior = np.zeros((4, 128, 128))
+      luta6._acao_anterior = ACAO_BLOQUEIO
+      
+      # Processa o frame. Como obter_acao_ativa retorna ACAO_BLOQUEIO,
+      # o loop registra acao_registrada = ACAO_BLOQUEIO
+      luta6.processar_frame(frame)
+      self.assertEqual(luta6._acao_anterior, ACAO_BLOQUEIO)
+      
+      # E o cerebro nao deve ter sido chamado para escolher acao (nenhuma acao adicionada a _pendentes)
+      self.assertEqual(len(luta6.cerebro._pendentes), 0)
+
+      # ----------------------------------------------------
+      # Teste G: Mascaramento de ACAO_ESPERAR no modo combo
+      # ----------------------------------------------------
+      # Reseta mock_ativa para ACAO_ESPERAR
+      mock_ativa.return_value = ACAO_ESPERAR
+      
+      luta7 = Luta(exibir_debug=False, modo_treino="combo")
+      luta7.estado = "LUTANDO"
+      luta7._log_reward_rt = False
+      
+      # Forca o esgotamento de defesas
+      luta7._bloqueios_no_combo = 3
+      luta7._esquivas_no_combo = 3
+      
+      # Processa o frame. Como bloqueios e esquivas estao esgotados,
+      # ACAO_ESPERAR deve ser mascarada, alem de esquiva e bloqueio, restando apenas ataques.
+      luta7.processar_frame(frame)
+      self.assertNotIn(ACAO_ESPERAR, luta7.cerebro.acoes_permitidas)
+      self.assertNotIn(ACAO_BLOQUEIO, luta7.cerebro.acoes_permitidas)
+      self.assertNotIn(ACAO_ESQUIVA, luta7.cerebro.acoes_permitidas)
+      self.assertIn(ACAO_ATAQUE_LEVE, luta7.cerebro.acoes_permitidas)
+      self.assertIn(ACAO_ATAQUE_MEDIO, luta7.cerebro.acoes_permitidas)
+
+      # ----------------------------------------------------
+      # Teste H: Modo Assistido (Imitacao do Humano)
+      # ----------------------------------------------------
+      luta8 = Luta(exibir_debug=False, modo_treino="assistido")
+      luta8.estado = "LUTANDO"
+      luta8._log_reward_rt = False
+      
+      with patch("src.bot.luta.esta_pressionada") as mock_press:
+        # Simula que o humano pressionou a tecla de bloqueio
+        mock_press.side_effect = lambda vkey: vkey == luta8._vkey_bloqueio
+        
+        luta8._estado_anterior = np.zeros((4, 128, 128))
+        luta8._acao_anterior = ACAO_ESPERAR
+        mock_rec.return_value = (4.5, False, {})
+        
+        luta8.processar_frame(frame)
+        self.assertEqual(luta8._acao_anterior, ACAO_BLOQUEIO)
+        self.assertAlmostEqual(luta8._ultima_recompensa, 4.5)

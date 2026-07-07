@@ -106,7 +106,8 @@ class CerebroIA:
   def __init__(self, acoes_permitidas=None, modo_treino="treino"):
     self.modo_treino = resolver_modo_treino(modo_treino)
     self.acoes = list(ACOES_IA)
-    self.acoes_permitidas = [int(acao) for acao in acoes_permitidas] if acoes_permitidas else list(ACOES_IA)
+    self.acoes_permitidas_modo = [int(acao) for acao in acoes_permitidas] if acoes_permitidas else list(ACOES_IA)
+    self.acoes_permitidas = list(self.acoes_permitidas_modo)
 
     pref_device = os.getenv("BOT_PPO_DEVICE", "auto").strip().lower()
     if pref_device in {"cuda", "gpu"} and torch.cuda.is_available():
@@ -341,7 +342,8 @@ class CerebroIA:
       probs = probs_torch.squeeze(0).detach().cpu().numpy().astype(np.float32)
 
       # Epsilon-Exploration para quebrar colapso de política durante o treino
-      epsilon = _env_float("BOT_EXPLORACAO_EPSILON", 0.12)
+      default_eps = 0.20 if self.modo_treino != ModoTreino.COMPLETO else 0.12
+      epsilon = _env_float("BOT_EXPLORACAO_EPSILON", default_eps)
       if epsilon > 0.0:
         # Corrige o bug olhando logits em vez de softmax
         permitidas = (logits.squeeze(0) > -1e8).float().cpu().numpy()
@@ -439,7 +441,7 @@ class CerebroIA:
       # Mascaramento das ações não permitidas do modo focado
       logits = logits.clone()
       for acao_ia in self.acoes:
-        if acao_ia not in self.acoes_permitidas:
+        if acao_ia not in self.acoes_permitidas_modo:
           idx_ia = self._indice_acao(acao_ia)
           logits[0, idx_ia] = -1e9
 
@@ -447,7 +449,8 @@ class CerebroIA:
       probs = probs_torch.squeeze(0).detach().cpu().numpy().astype(np.float32)
 
       # Replica a exploração estocástica para manter a consistência matemática dos gradientes PPO
-      epsilon = _env_float("BOT_EXPLORACAO_EPSILON", 0.12)
+      default_eps = 0.20 if self.modo_treino != ModoTreino.COMPLETO else 0.12
+      epsilon = _env_float("BOT_EXPLORACAO_EPSILON", default_eps)
       if epsilon > 0.0:
         # Corrige o bug olhando logits em vez de softmax
         permitidas = (logits.squeeze(0) > -1e8).float().cpu().numpy()
@@ -531,9 +534,22 @@ class CerebroIA:
     if len(self._rollout_recompensas) >= self.rollout_size or terminal:
       self._atualizar_modelo(proximo_estado=proximo_estado, terminal=terminal)
 
+  def _limpar_rollout(self):
+    self._rollout_obs.clear()
+    self._rollout_next_obs.clear()
+    self._rollout_acoes.clear()
+    self._rollout_recompensas.clear()
+    self._rollout_dones.clear()
+    self._rollout_logprobs.clear()
+    self._rollout_valores.clear()
+    self._rollout_especial_disponivel.clear()
+    self._rollout_oponente_tem_especial.clear()
+
   def _atualizar_modelo(self, proximo_estado=None, terminal=False):
     total_passos = len(self._rollout_recompensas)
-    if total_passos == 0:
+    if total_passos < 2:
+      if terminal:
+        self._limpar_rollout()
       return
 
     if terminal or proximo_estado is None:
@@ -561,7 +577,10 @@ class CerebroIA:
       prox_val = valores[idx]
 
     vantagens_t = torch.from_numpy(vantagens).to(self._device)
-    vantagens_t = (vantagens_t - vantagens_t.mean()) / (vantagens_t.std() + 1e-8)
+    std = vantagens_t.std()
+    if torch.isnan(std) or std < 1e-8:
+      std = torch.tensor(1.0, device=self._device)
+    vantagens_t = (vantagens_t - vantagens_t.mean()) / std
 
     obs_t = torch.from_numpy(np.asarray(self._rollout_obs, dtype=np.float32)).to(self._device)
     obs_next_t = torch.from_numpy(np.asarray(self._rollout_next_obs, dtype=np.float32)).to(self._device)
@@ -619,14 +638,15 @@ class CerebroIA:
 
         # Mascara 3: Ações não permitidas do modo focado
         for acao_ia in self.acoes:
-          if acao_ia not in self.acoes_permitidas:
+          if acao_ia not in self.acoes_permitidas_modo:
             idx_ia = self._indice_acao(acao_ia)
             logits[:, idx_ia] = -1e9
 
         probs_torch = F.softmax(logits, dim=-1)
 
         # Aplicar exploração estocástica no lote de treino
-        epsilon = _env_float("BOT_EXPLORACAO_EPSILON", 0.12)
+        default_eps = 0.20 if self.modo_treino != ModoTreino.COMPLETO else 0.12
+        epsilon = _env_float("BOT_EXPLORACAO_EPSILON", default_eps)
         if epsilon > 0.0:
           # Corrige o bug usando os logits para identificar ações permitidas
           permitidas = (logits > -1e8).float()
@@ -688,15 +708,7 @@ class CerebroIA:
     self._ultima_perda_total = float(np.mean(perdas_total)) if perdas_total else 0.0
     self._atualizacoes += 1
 
-    self._rollout_obs.clear()
-    self._rollout_next_obs.clear()
-    self._rollout_acoes.clear()
-    self._rollout_recompensas.clear()
-    self._rollout_dones.clear()
-    self._rollout_logprobs.clear()
-    self._rollout_valores.clear()
-    self._rollout_especial_disponivel.clear()
-    self._rollout_oponente_tem_especial.clear()
+    self._limpar_rollout()
 
     if (self._atualizacoes % self.salvar_a_cada_updates) == 0:
       self.salvar_memoria()

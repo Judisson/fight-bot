@@ -70,25 +70,25 @@ class ProcessadorVisaoTermica:
     mascara_termica = cv2.bitwise_or(m1, m2)
     densidade_termica = mascara_termica.astype(np.float32) / 255.0
 
-    # 3. Movimento via Fluxo Otico (Farneback) e Compensacao de Ego-Motion
+    # 3. Movimento via Fluxo Ótico Esparso (Lucas-Kanade)
     magnitude_movimento = np.zeros((self.frame_size[1], self.frame_size[0]), dtype=np.float32)
     if self.gray_anterior is not None:
-      # Calculo do deslocamento global da camera
-      shift, _ = cv2.phaseCorrelate(self.gray_anterior.astype(np.float32), gray.astype(np.float32))
-      dx, dy = shift
-
-      fluxo = cv2.calcOpticalFlowFarneback(
-        self.gray_anterior, gray, None,
-        pyr_scale=0.5, levels=3, winsize=15,
-        iterations=3, poly_n=5, poly_sigma=1.2, flags=0
-      )
-      
-      # Subtrai o movimento da camera do fluxo total
-      fluxo[..., 0] -= dx
-      fluxo[..., 1] -= dy
-
-      mag, _ = cv2.cartToPolar(fluxo[..., 0], fluxo[..., 1])
-      magnitude_movimento = cv2.normalize(mag, None, 0.0, 1.0, cv2.NORM_MINMAX)
+      # Rastreia pontos característicos proeminentes (cantos, hitboxes)
+      p0 = cv2.goodFeaturesToTrack(self.gray_anterior, maxCorners=100, qualityLevel=0.01, minDistance=10)
+      if p0 is not None:
+        p1, st, err = cv2.calcOpticalFlowPyrLK(self.gray_anterior, gray, p0, None, winSize=(15, 15), maxLevel=2)
+        if p1 is not None:
+          bons_novos = p1[st == 1]
+          bons_antigos = p0[st == 1]
+          for novo, antigo in zip(bons_novos, bons_antigos):
+            a, b = novo.ravel()
+            c, d = antigo.ravel()
+            dist = np.sqrt((a - c)**2 + (b - d)**2)
+            cv2.circle(magnitude_movimento, (int(a), int(b)), 5, float(dist), -1)
+          
+          max_val = np.max(magnitude_movimento)
+          if max_val > 0.0:
+            magnitude_movimento /= max_val
 
     self.gray_anterior = gray
 

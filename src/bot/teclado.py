@@ -1,7 +1,8 @@
-﻿import pydirectinput
+import pydirectinput
 import time
 
 pydirectinput.FAILSAFE = False
+pydirectinput.PAUSE = 0.0
 
 
 def pressionar(tecla):

@@ -16,6 +16,7 @@ class ModoTreino(str, Enum):
   DEFENDER = "defender"
   COMBO = "combo"
   DESTREZA = "destreza"
+  ASSISTIDO = "assistido"
 
 
 _ALIASES_TREINO = {
@@ -25,6 +26,7 @@ _ALIASES_TREINO = {
   "defender": ModoTreino.DEFENDER,
   "combo": ModoTreino.COMBO,
   "destreza": ModoTreino.DESTREZA,
+  "assistido": ModoTreino.ASSISTIDO,
 }
 
 
@@ -41,7 +43,7 @@ def obter_acoes_permitidas(modo_treino):
   if modo == ModoTreino.APARAR:
     return [ACAO_ESPERAR, ACAO_BLOQUEIO]
   elif modo == ModoTreino.DEFENDER:
-    return [ACAO_ESPERAR, ACAO_ESQUIVA, ACAO_BLOQUEIO]
+    return [ACAO_ESPERAR, ACAO_BLOQUEIO]
   elif modo == ModoTreino.DESTREZA:
     return [ACAO_ESPERAR, ACAO_ESQUIVA]
   elif modo == ModoTreino.COMBO:

@@ -1,4 +1,4 @@
-﻿import pygetwindow as gw
+import pygetwindow as gw
 
 
 def encontrar_janela(titulo):

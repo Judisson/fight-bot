@@ -184,6 +184,7 @@ def _base_info(acao_atual):
     "destreza_neutra_especial_recente": False,
     "punicao_ofensiva_especial_recente": False,
     "punicao_espera_especial_recente": False,
+    "decaimento_repeticao": False,
   }
 
 
@@ -448,6 +449,7 @@ def obter_recompensa(
     if k > 0:
       lambda_degrade = 0.5
       recompensa = recompensa * (lambda_degrade ** k)
+      info["decaimento_repeticao"] = True
       if k >= 4:
         # Se passar mais de 4 frames na memória executando o mesmo golpe, aplica punição pesada
         recompensa -= 2.0 * (k - 3)
@@ -462,13 +464,11 @@ def obter_recompensa(
       elif nivel_especial_inimigo == 2:
         recompensa += PESO_PUNICAO_AGRESSIVIDADE_E2
         info["punicao_agressividade_especial"] = True
-
     # 2. Pune postura defensiva se o oponente não tem especial carregado (E0)
-    elif acao_atual in (ACAO_ESQUIVA, ACAO_BLOQUEIO):
-      if nivel_especial_inimigo == 0:
-        recompensa += PESO_PUNICAO_DEFESA_SEM_ESPECIAL
-        info["punicao_defesa_sem_especial"] = True
-
+    # elif acao_atual in (ACAO_ESQUIVA, ACAO_BLOQUEIO):
+    #   if nivel_especial_inimigo == 0:
+    #     recompensa += PESO_PUNICAO_DEFESA_SEM_ESPECIAL
+    #     info["punicao_defesa_sem_especial"] = True
     # 3. Pune se o oponente atingir o especial de nível 3 (E3)
     if nivel_especial_inimigo == 3:
       recompensa += PESO_PUNICAO_OPONENTE_E3

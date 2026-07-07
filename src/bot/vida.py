@@ -1,6 +1,7 @@
-﻿import os
+import os
 
 import cv2
+import numpy as np
 
 from src.utils.log import log
 
@@ -46,25 +47,16 @@ def _detectar_percentual_por_cor(roi):
   if altura == 0 or largura == 0:
     return None, 0.0, 0, 0
 
-  colunas_ativas = 0
-  colunas_escuras_total = 0
-  atividade_por_coluna = []
-  for x in range(largura):
-    coluna = mascara[:, x]
-    ativos = cv2.countNonZero(coluna)
-    atividade_por_coluna.append(ativos)
-    if ativos > altura * LIMIAR_COLUNA_ATIVA:
-      colunas_ativas += 1
-    if ativos == 0:
-      colunas_escuras_total += 1
+  atividade_por_coluna = np.sum(mascara > 0, axis=0)
+  colunas_ativas = int(np.sum(atividade_por_coluna > altura * LIMIAR_COLUNA_ATIVA))
+  colunas_escuras_total = int(np.sum(atividade_por_coluna == 0))
 
   # Escuridao relevante para perda de vida vem do final da barra (direita).
-  colunas_escuras_finais = 0
-  for ativos in reversed(atividade_por_coluna):
-    if ativos == 0:
-      colunas_escuras_finais += 1
-    else:
-      break
+  zeros_finais_rev = (atividade_por_coluna == 0)[::-1]
+  if not np.any(~zeros_finais_rev):
+    colunas_escuras_finais = largura
+  else:
+    colunas_escuras_finais = int(np.argmax(~zeros_finais_rev))
 
   percentual = float((colunas_ativas / largura) * 100.0)
   confianca = min(1.0, max(0.0, colunas_ativas / max(1, largura)))

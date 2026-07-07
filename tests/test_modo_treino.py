@@ -30,7 +30,7 @@ class TestModoTreino(TestCase):
     self.assertEqual(obter_acoes_permitidas("aparar"), [ACAO_ESPERAR, ACAO_BLOQUEIO])
 
   def test_acoes_permitidas_defender(self):
-    self.assertEqual(obter_acoes_permitidas("defender"), [ACAO_ESPERAR, ACAO_ESQUIVA, ACAO_BLOQUEIO])
+    self.assertEqual(obter_acoes_permitidas("defender"), [ACAO_ESPERAR, ACAO_BLOQUEIO])
 
   def test_acoes_permitidas_destreza(self):
     self.assertEqual(obter_acoes_permitidas("destreza"), [ACAO_ESPERAR, ACAO_ESQUIVA])

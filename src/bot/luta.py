@@ -1,3 +1,4 @@
+import ctypes
 import json
 import os
 import time
@@ -24,7 +25,15 @@ from src.ai.recompensa import (
   PESO_VITORIA,
   obter_recompensa,
 )
-from src.bot.acoes_luta import executar_acao
+from src.bot.acoes_luta import (
+  executar_acao,
+  obter_acao_ativa,
+  TECLA_ESQUIVA,
+  TECLA_BLOQUEIO,
+  TECLA_ESPECIAL,
+  TECLA_ATAQUE_LEVE,
+  TECLA_ATAQUE_MEDIO,
+)
 from src.bot.poder import obter_info_poder
 from src.bot.vida import desenhar_info_vida, obter_info_vida
 from src.utils.debug_rede_telas import gerar_tela_perceptron, gerar_tela_pixel
@@ -39,6 +48,33 @@ from src.utils.visao_debug import (
 CAMINHO_LOG_TREINO = Path("data/treino_log.jsonl")
 
 
+def converter_para_vkey(tecla_str):
+  t = str(tecla_str or "").strip().upper()
+  if not t:
+    return 0
+  if t == "ENTER": return 0x0D
+  if t == "SPACE": return 0x20
+  if t == "UP": return 0x26
+  if t == "DOWN": return 0x28
+  if t == "LEFT": return 0x25
+  if t == "RIGHT": return 0x27
+  if t == "CTRL": return 0x11
+  if t == "SHIFT": return 0x10
+  if t == "ALT": return 0x12
+  if len(t) == 1:
+    return ord(t)
+  return 0
+
+
+def esta_pressionada(vkey):
+  if os.name != "nt" or vkey <= 0:
+    return False
+  try:
+    return (ctypes.windll.user32.GetAsyncKeyState(vkey) & 0x8000) != 0
+  except Exception:
+    return False
+
+
 class Luta:
 
   def __init__(self, exibir_debug=True, modo_treino="treino"):
@@ -48,6 +84,12 @@ class Luta:
       acoes_permitidas=obter_acoes_permitidas(self.modo_treino),
       modo_treino=self.modo_treino,
     )
+    self._frames_ataque_leve_segurado = 0
+    self._vkey_esquiva = converter_para_vkey(TECLA_ESQUIVA)
+    self._vkey_bloqueio = converter_para_vkey(TECLA_BLOQUEIO)
+    self._vkey_especial = converter_para_vkey(TECLA_ESPECIAL)
+    self._vkey_ataque_leve = converter_para_vkey(TECLA_ATAQUE_LEVE)
+    self._vkey_ataque_medio = converter_para_vkey(TECLA_ATAQUE_MEDIO)
     self.estado = "BUSCANDO_LUTA"
     self.episodio = 0
     self.vida_jogador_anterior = None
@@ -58,9 +100,18 @@ class Luta:
     self._ataques_sem_dano_consecutivos = 0
     self._consecutive_medios = 0
     self._consecutive_leves = 0
+    self._consecutive_pesados = 0
     self._combo_hits = 0
     self._exposto = False
     self._tempo_exposto = 0.0
+    self._tempo_bloqueio_consecutivo = 0.0
+    self._tempo_bloqueio_sem_dano = 0.0
+    self._tempo_bloqueio_combo = 0.0
+    self._bloqueios_no_combo = 0
+    self._esquivas_no_combo = 0
+    self._ultimo_bloqueio_ativo = False
+    self._ultima_esquiva_ativa = False
+    self._ultimo_ataque_ts = 0.0
 
     self._estado_anterior = None
     self._acao_anterior = None
@@ -80,6 +131,10 @@ class Luta:
       self._janela_dano_recente = max(1, int(os.getenv("BOT_DANO_RECENTE_FRAMES", "8")))
     except ValueError:
       self._janela_dano_recente = 8
+    try:
+      self._janela_bloqueio_dano = max(1, int(os.getenv("BOT_BLOQUEIO_DANO_FRAMES", "2")))
+    except ValueError:
+      self._janela_bloqueio_dano = 2
     try:
       self._qtd_filtros_snapshot = max(1, int(os.getenv("BOT_DEBUG_SNAPSHOT_FILTROS", "3")))
     except ValueError:
@@ -124,6 +179,7 @@ class Luta:
     self._mensagem_evento_debug = ""
     self._mensagem_evento_debug_restante = 0
     self._frames_dano_recente = 0
+    self._frames_bloqueio_dano = 0
     self._frames_esperando_consecutivos = 0
     self._frames_ameaca_sem_decisao = 0
     self._frames_combo_intervalo = 0
@@ -156,6 +212,29 @@ class Luta:
         f"Debug filtro ativo. Pressione '{self._tecla_snapshot_filtro.upper()}' "
         "na janela de debug para imprimir snapshot no console."
       )
+
+  def _detectar_acao_humana(self):
+    if self._vkey_especial and esta_pressionada(self._vkey_especial):
+      return ACAO_ESPECIAL
+    
+    if self._vkey_bloqueio and esta_pressionada(self._vkey_bloqueio):
+      return ACAO_BLOQUEIO
+      
+    if self._vkey_esquiva and esta_pressionada(self._vkey_esquiva):
+      return ACAO_ESQUIVA
+
+    if self._vkey_ataque_leve and esta_pressionada(self._vkey_ataque_leve):
+      self._frames_ataque_leve_segurado += 1
+      if self._frames_ataque_leve_segurado >= 8:
+        return ACAO_ATAQUE_PESADO
+      return ACAO_ATAQUE_LEVE
+    else:
+      self._frames_ataque_leve_segurado = 0
+
+    if self._vkey_ataque_medio and esta_pressionada(self._vkey_ataque_medio):
+      return ACAO_ATAQUE_MEDIO
+
+    return ACAO_ESPERAR
 
   def processar_frame(self, frame):
     estado_luta = obter_estado_luta(frame)
@@ -298,34 +377,133 @@ class Luta:
       destreza_perfeita = bool(info_recompensa.get("destreza_perfeita"))
 
       # --- Bônus Específicos para Modos de Treino Focado ---
-      if self.modo_treino == ModoTreino.APARAR and aparar_perfeito:
-        from src.ai.recompensa import PESO_APARAR_PERFEITO
-        recompensa += PESO_APARAR_PERFEITO
-        info_recompensa["aparar_perfeito_focado"] = True
-        log("[TREINO-APARAR] Bônus de aparo perfeito duplicado!")
+      if self.modo_treino not in (ModoTreino.COMPLETO, ModoTreino.ASSISTIDO):
+        recompensa_focada = 0.0
+        info_focada = info_recompensa.copy()
 
-      if self.modo_treino == ModoTreino.DESTREZA and destreza_perfeita:
-        from src.ai.recompensa import PESO_DESTREZA_PERFEITA
-        recompensa += PESO_DESTREZA_PERFEITA
-        info_recompensa["destreza_perfeita_focado"] = True
-        log("[TREINO-DESTREZA] Bônus de destreza perfeita duplicado!")
+        if self.modo_treino == ModoTreino.DEFENDER:
+          # Apenas gratifica se estiver bloqueando E tomou dano (mitigou dano)
+          if self._acao_anterior == ACAO_BLOQUEIO:
+            self._tempo_bloqueio_consecutivo += delta_tempo_seg
+            self._tempo_bloqueio_sem_dano += delta_tempo_seg
 
-      if self.modo_treino == ModoTreino.COMBO and self._combo_hits >= 4:
-        if self._acao_anterior in (ACAO_ESQUIVA, ACAO_BLOQUEIO):
-          recompensa += 10.0
-          info_recompensa["combo_reset_defensivo"] = True
-          info_recompensa["combo_reset_defensivo_valor"] = 10.0
-          log("[TREINO-COMBO] Bônus de +10.0 por reset defensivo após combo!")
+            if tomou_dano:
+              recompensa_focada += 5.0
+              info_focada["defesa_mitigou_dano"] = True
+              self._tempo_bloqueio_sem_dano = 0.0
 
-      # Se executou ação de reset, limpa contadores
-      if self._acao_anterior in (ACAO_ESQUIVA, ACAO_BLOQUEIO, ACAO_ESPERAR):
-        self._combo_hits = 0
-        self._consecutive_medios = 0
-        self._consecutive_leves = 0
+            if self._tempo_bloqueio_consecutivo > 10.0:
+              recompensa_focada += -2.0
+              info_focada["punicao_defesa_10s"] = True
+            elif self._tempo_bloqueio_sem_dano > 5.0:
+              recompensa_focada += -1.5
+              info_focada["punicao_defesa_sem_dano_5s"] = True
+          else:
+            self._tempo_bloqueio_consecutivo = 0.0
+            self._tempo_bloqueio_sem_dano = 0.0
 
-      # Incrementa hits se causou dano
-      if causou_dano:
-        self._combo_hits += 1
+        elif self.modo_treino == ModoTreino.COMBO:
+          # Bloqueio prolongado penalidade em Combo Mode (> 2.5s)
+          if self._acao_anterior == ACAO_BLOQUEIO:
+            self._tempo_bloqueio_combo += delta_tempo_seg
+            if self._tempo_bloqueio_combo > 2.5:
+              recompensa_focada += -1.5
+              info_focada["punicao_defesa_combo_2_5s"] = True
+          else:
+            self._tempo_bloqueio_combo = 0.0
+
+          # Se tomou dano, o combo quebra e zera para 0
+          if tomou_dano:
+            self._combo_hits = 0
+
+          # Se causou dano, reseta os contadores individuais de bloqueios e esquivas
+          if causou_dano:
+            self._bloqueios_no_combo = 0
+            self._esquivas_no_combo = 0
+            self._ultimo_bloqueio_ativo = False
+            self._ultima_esquiva_ativa = False
+
+          # Borda de subida Bloqueio
+          if self._acao_anterior == ACAO_BLOQUEIO:
+            if not self._ultimo_bloqueio_ativo:
+              self._ultimo_bloqueio_ativo = True
+              self._bloqueios_no_combo += 1
+              log(f"[COMBO-DEFESA] Ativacao de Bloqueio {self._bloqueios_no_combo}/3")
+              if self._bloqueios_no_combo >= 3:
+                recompensa_focada += -3.0
+                info_focada["punicao_limite_bloqueios_combo"] = True
+          else:
+            self._ultimo_bloqueio_ativo = False
+
+          # Borda de subida Esquiva
+          if self._acao_anterior == ACAO_ESQUIVA:
+            if not self._ultima_esquiva_ativa:
+              self._ultima_esquiva_ativa = True
+              self._esquivas_no_combo += 1
+              log(f"[COMBO-DEFESA] Ativacao de Esquiva {self._esquivas_no_combo}/3")
+              if self._esquivas_no_combo >= 3:
+                recompensa_focada += -3.0
+                info_focada["punicao_limite_esquivas_combo"] = True
+          else:
+            self._ultima_esquiva_ativa = False
+
+          # Ações de ataque:
+          if self._acao_anterior in (ACAO_ATAQUE_LEVE, ACAO_ATAQUE_MEDIO):
+            if causou_dano:
+              self._combo_hits += 1
+              if self._combo_hits in (1, 2, 3):
+                recompensa_focada += 1.0
+                info_focada["combo_hit_intermediario"] = True
+              elif self._combo_hits == 4:
+                recompensa_focada += 2.0
+                info_focada["combo_hit_finalizador"] = True
+              elif self._combo_hits > 4:
+                recompensa_focada += -3.0
+                info_focada["combo_incorreto"] = True
+            else:
+              # Ataque não causou dano (errou ou bateu na defesa): punição!
+              recompensa_focada += -1.5
+              info_focada["punicao_ataque_sem_dano_treino"] = True
+
+          # Ações de reset/defensivas (aplica bônus de reset correto se atingiu 4 hits, senão reseta combo para 0)
+          elif self._acao_anterior in (ACAO_ESQUIVA, ACAO_BLOQUEIO):
+            if self._combo_hits == 4:
+              recompensa_focada += 10.0
+              info_focada["combo_completado"] = True
+              self._bloqueios_no_combo = 0
+              self._esquivas_no_combo = 0
+              self._ultimo_bloqueio_ativo = False
+              self._ultima_esquiva_ativa = False
+            self._combo_hits = 0
+
+          # Esperar ou outras ações resetam o combo para 0
+          elif self._acao_anterior == ACAO_ESPERAR:
+            self._combo_hits = 0
+
+        elif self.modo_treino == ModoTreino.APARAR:
+          if aparar_perfeito:
+            recompensa_focada += 5.0
+            info_focada["aparar_perfeito_focado"] = True
+
+        elif self.modo_treino == ModoTreino.DESTREZA:
+          if destreza_perfeita:
+            recompensa_focada += 6.0
+            info_focada["destreza_perfeita_focado"] = True
+
+        recompensa = recompensa_focada
+        info_recompensa = info_focada
+
+      # Se executou ação de reset, limpa contadores (apenas no modo completo ou assistido)
+      if self.modo_treino in (ModoTreino.COMPLETO, ModoTreino.ASSISTIDO):
+        if self._acao_anterior in (ACAO_ESQUIVA, ACAO_BLOQUEIO, ACAO_ESPERAR):
+          self._combo_hits = 0
+          self._consecutive_medios = 0
+          self._consecutive_leves = 0
+          self._consecutive_pesados = 0
+
+        # Incrementa hits se causou dano
+        if causou_dano:
+          self._combo_hits += 1
 
       # Controle de spam de ataques sem dano
       is_ataque = self._acao_anterior in (ACAO_ATAQUE_LEVE, ACAO_ATAQUE_MEDIO, ACAO_ATAQUE_PESADO, ACAO_ESPECIAL)
@@ -347,14 +525,26 @@ class Luta:
       if self._acao_anterior == ACAO_ATAQUE_MEDIO:
         self._consecutive_medios += 1
         self._consecutive_leves = 0
+        self._consecutive_pesados = 0
       elif self._acao_anterior == ACAO_ATAQUE_LEVE:
         self._consecutive_leves += 1
+        self._consecutive_medios = 0
+        self._consecutive_pesados = 0
+      elif self._acao_anterior == ACAO_ATAQUE_PESADO:
+        self._consecutive_pesados += 1
+        self._consecutive_leves = 0
         self._consecutive_medios = 0
 
       # Condições que ativam Exposição
       if self._consecutive_medios >= 2:
         if not self._exposto:
           log("[COMBO] Exposto por 2 ataques médios consecutivos!")
+        self._exposto = True
+        self._tempo_exposto = 0.0
+
+      if self._consecutive_pesados >= 2:
+        if not self._exposto:
+          log("[COMBO] Exposto por 2 ataques pesados consecutivos!")
         self._exposto = True
         self._tempo_exposto = 0.0
 
@@ -377,29 +567,33 @@ class Luta:
           self._exposto = False
           self._consecutive_medios = 0
           self._consecutive_leves = 0
+          self._consecutive_pesados = 0
           self._combo_hits = 0
           log("[COMBO] Exposição resolvida por tomar dano.")
         elif aparar_perfeito:
           self._exposto = False
           self._consecutive_medios = 0
           self._consecutive_leves = 0
+          self._consecutive_pesados = 0
           self._combo_hits = 0
           log("[COMBO] Exposição resolvida por Aparar Perfeito!")
         elif self._acao_anterior == ACAO_ESQUIVA:
           self._exposto = False
           self._consecutive_medios = 0
           self._consecutive_leves = 0
+          self._consecutive_pesados = 0
           self._combo_hits = 0
           log("[COMBO] Exposição resolvida por realizar Esquiva.")
         elif self._tempo_exposto >= 1.5:
           self._exposto = False
           self._consecutive_medios = 0
           self._consecutive_leves = 0
+          self._consecutive_pesados = 0
           self._combo_hits = 0
           log("[COMBO] Exposição expirada após esperar 1.5s.")
 
-      # Aplica a punição se tomou ação inválida estando exposto
-      if self._exposto:
+      # Aplica a punição se tomou ação inválida estando exposto (apenas no modo completo ou assistido)
+      if self._exposto and self.modo_treino in (ModoTreino.COMPLETO, ModoTreino.ASSISTIDO):
         if self._acao_anterior in (ACAO_ATAQUE_LEVE, ACAO_ATAQUE_MEDIO, ACAO_ATAQUE_PESADO, ACAO_ESPECIAL):
           try:
             peso_exposicao = float(os.getenv("BOT_PESO_PUNICAO_EXPOSICAO", "-8.00"))
@@ -456,18 +650,74 @@ class Luta:
       )
       self._atualizar_evento_debug(info_recompensa)
 
-    acao = self.cerebro.escolher_acao(
-      estado_atual,
-      especial_disponivel=tem_especial,
-      oponente_tem_especial=inimigo_tem_especial,
-      oponente_especial_recente=(self._tempo_especial_inimigo_recente > 0.0),
-    )
-    acao_executada = executar_acao(acao)
-    # Evita enviesar treino/metricas repetindo a acao em execucao quando a fila esta cheia.
-    # Quando nao executa no frame atual, tratamos como esperar.
-    acao_registrada = acao if acao_executada else ACAO_ESPERAR
-    if not acao_executada:
-      self._acoes_fila_cheia_episodio += 1
+    # 1. Determina as acoes permitidas base do modo de treino
+    permitidas = obter_acoes_permitidas(self.modo_treino)
+
+    # 2. Se o bot esta tomando dano (janela de bloqueio ativa), restringe a apenas esperar
+    if self._frames_bloqueio_dano > 0:
+      permitidas = [ACAO_ESPERAR]
+      self._frames_bloqueio_dano -= 1
+    else:
+      # Se saiu do bloqueio absoluto, mas ainda esta sob dano recente (hitstun residual/combo),
+      # bloqueamos todas as acoes ofensivas para evitar contra-ataques inuteis e punicoes.
+      if sinais_estado.get("tomou_dano_recente"):
+        permitidas = [a for a in permitidas if a not in (ACAO_ATAQUE_LEVE, ACAO_ATAQUE_MEDIO, ACAO_ATAQUE_PESADO, ACAO_ESPECIAL)]
+
+      # Caso contrario, aplica as restricoes especificas do modo de treino
+      if self.modo_treino == ModoTreino.COMBO:
+        # Cooldown de ataque
+        if time.time() - self._ultimo_ataque_ts < 0.3:
+          permitidas = [a for a in permitidas if a not in (ACAO_ATAQUE_LEVE, ACAO_ATAQUE_MEDIO)]
+          
+        # Limite de bloqueios
+        if self._bloqueios_no_combo >= 3:
+          permitidas = [a for a in permitidas if a != ACAO_BLOQUEIO]
+          
+        # Limite de esquivas
+        if self._esquivas_no_combo >= 3:
+          permitidas = [a for a in permitidas if a != ACAO_ESQUIVA]
+
+        # Se bloqueios e esquivas estao esgotados, forca o ataque mascarando esperar
+        if self._bloqueios_no_combo >= 3 and self._esquivas_no_combo >= 3:
+          permitidas = [a for a in permitidas if a != ACAO_ESPERAR]
+
+    if not permitidas:
+      permitidas = [ACAO_ESPERAR]
+      
+    self.cerebro.acoes_permitidas = permitidas
+
+    if self.modo_treino == ModoTreino.ASSISTIDO:
+      acao = self._detectar_acao_humana()
+      acao_executada = True
+      acao_registrada = acao
+    else:
+      acao_ativa = obter_acao_ativa()
+      if acao_ativa != ACAO_ESPERAR:
+        # O bot esta executando uma acao fisica. Nao chamamos o cerebro para escolher outra.
+        # Apenas registramos que a acao atual continua sendo a acao_ativa.
+        acao = acao_ativa
+        acao_executada = False
+      else:
+        # O bot esta livre para decidir.
+        acao = self.cerebro.escolher_acao(
+          estado_atual,
+          especial_disponivel=tem_especial,
+          oponente_tem_especial=inimigo_tem_especial,
+          oponente_especial_recente=(self._tempo_especial_inimigo_recente > 0.0),
+        )
+        acao_executada = executar_acao(acao)
+
+      if acao_executada and acao in (ACAO_ATAQUE_LEVE, ACAO_ATAQUE_MEDIO) and self.modo_treino == ModoTreino.COMBO:
+        self._ultimo_ataque_ts = time.time()
+
+      # Evita enviesar treino/metricas repetindo a acao em execucao quando a fila esta cheia.
+      # Se a acao veio do worker de acao ativa, ela e a acao registrada de fato.
+      if acao_ativa != ACAO_ESPERAR:
+        acao_registrada = acao_ativa
+      else:
+        acao_registrada = acao if acao_executada else ACAO_ESPERAR
+        if not acao_executada:
+          self._acoes_fila_cheia_episodio += 1
 
     self._estado_anterior = estado_atual
     self._acao_anterior = acao_registrada
@@ -564,6 +814,34 @@ class Luta:
       return "punicao_defesa_sem_especial"
     if info.get("punicao_oponente_e3"):
       return "punicao_oponente_e3"
+    if info.get("punicao_ataque_sem_dano_treino"):
+      return "ataque_sem_dano_treino"
+    if info.get("punicao_limite_bloqueios_combo"):
+      return "limite_bloqueios_combo"
+    if info.get("punicao_limite_esquivas_combo"):
+      return "limite_esquivas_combo"
+    if info.get("defesa_mitigou_dano"):
+      return "defesa_mitigou_dano"
+    if info.get("punicao_defesa_10s"):
+      return "punicao_defesa_10s"
+    if info.get("punicao_defesa_sem_dano_5s"):
+      return "punicao_defesa_sem_dano_5s"
+    if info.get("punicao_defesa_combo_2_5s"):
+      return "punicao_defesa_combo_2_5s"
+    if info.get("combo_hit_intermediario"):
+      return "combo_hit_intermediario"
+    if info.get("combo_hit_finalizador"):
+      return "combo_hit_finalizador"
+    if info.get("combo_incorreto"):
+      return "combo_incorreto"
+    if info.get("punicao_ataque_sem_dano"):
+      return "ataque_sem_dano"
+    if info.get("punicao_esquiva_errada_treino"):
+      return "esquiva_errada_treino"
+    if info.get("punicao_bloqueio_errado_treino"):
+      return "bloqueio_errado_treino"
+    if info.get("decaimento_repeticao"):
+      return "decaimento_repeticao"
     return "ajuste_geral"
 
   def _detectar_sinais_estado(self, info_vida):
@@ -578,6 +856,7 @@ class Luta:
     ):
       inimigo_atacando = True
       self._frames_dano_recente = self._janela_dano_recente
+      self._frames_bloqueio_dano = self._janela_bloqueio_dano
     elif self._frames_dano_recente > 0:
       self._frames_dano_recente -= 1
 
@@ -613,6 +892,50 @@ class Luta:
     return True
 
   def _atualizar_evento_debug(self, info_recompensa):
+    if info_recompensa.get("punicao_limite_bloqueios_combo"):
+      self._mensagem_evento_debug = "EXCESSO BLOQUEIO -3.0"
+      self._mensagem_evento_debug_restante = 20
+      return
+    if info_recompensa.get("punicao_limite_esquivas_combo"):
+      self._mensagem_evento_debug = "EXCESSO ESQUIVA -3.0"
+      self._mensagem_evento_debug_restante = 20
+      return
+    if info_recompensa.get("punicao_ataque_sem_dano_treino"):
+      self._mensagem_evento_debug = "ATK FALHOU -1.5"
+      self._mensagem_evento_debug_restante = 20
+      return
+    if info_recompensa.get("punicao_defesa_combo_2_5s"):
+      self._mensagem_evento_debug = "PUNIDO DEFESA COMBO -1.5"
+      self._mensagem_evento_debug_restante = 20
+      return
+    if info_recompensa.get("combo_hit_intermediario"):
+      self._mensagem_evento_debug = "HIT COMBO +1.0"
+      self._mensagem_evento_debug_restante = 16
+      return
+    if info_recompensa.get("combo_hit_finalizador"):
+      self._mensagem_evento_debug = "HIT 4 +2.0"
+      self._mensagem_evento_debug_restante = 16
+      return
+    if info_recompensa.get("defesa_mitigou_dano"):
+      self._mensagem_evento_debug = "MITIGOU DANO +5.0"
+      self._mensagem_evento_debug_restante = 20
+      return
+    if info_recompensa.get("punicao_defesa_10s"):
+      self._mensagem_evento_debug = "PUNIDO DEFESA 10S"
+      self._mensagem_evento_debug_restante = 20
+      return
+    if info_recompensa.get("punicao_defesa_sem_dano_5s"):
+      self._mensagem_evento_debug = "PUNIDO DEFESA S/ DANO"
+      self._mensagem_evento_debug_restante = 20
+      return
+    if info_recompensa.get("combo_completado"):
+      self._mensagem_evento_debug = "COMBO COMPLETADO +10.0"
+      self._mensagem_evento_debug_restante = 20
+      return
+    if info_recompensa.get("combo_incorreto"):
+      self._mensagem_evento_debug = "COMBO INCORRETO -3.0"
+      self._mensagem_evento_debug_restante = 20
+      return
     if info_recompensa.get("punicao_ataque_sem_dano"):
       self._mensagem_evento_debug = "PUNIDO SPAM ATK"
       self._mensagem_evento_debug_restante = 20
@@ -740,6 +1063,14 @@ class Luta:
     self._acoes_fila_cheia_episodio = 0
     self._dano_tomado_episodio = 0.0
     self._dano_inimigo_episodio = 0.0
+    self._tempo_bloqueio_consecutivo = 0.0
+    self._tempo_bloqueio_sem_dano = 0.0
+    self._tempo_bloqueio_combo = 0.0
+    self._bloqueios_no_combo = 0
+    self._esquivas_no_combo = 0
+    self._ultimo_bloqueio_ativo = False
+    self._ultima_esquiva_ativa = False
+    self._ultimo_ataque_ts = 0.0
 
   def _resetar_contexto_pos_episodio(self):
     self.estado = "BUSCANDO_LUTA"
@@ -749,9 +1080,18 @@ class Luta:
     self._oponente_tem_especial_anterior = False
     self._consecutive_medios = 0
     self._consecutive_leves = 0
+    self._consecutive_pesados = 0
     self._combo_hits = 0
     self._exposto = False
     self._tempo_exposto = 0.0
+    self._tempo_bloqueio_consecutivo = 0.0
+    self._tempo_bloqueio_sem_dano = 0.0
+    self._tempo_bloqueio_combo = 0.0
+    self._bloqueios_no_combo = 0
+    self._esquivas_no_combo = 0
+    self._ultimo_bloqueio_ativo = False
+    self._ultima_esquiva_ativa = False
+    self._ultimo_ataque_ts = 0.0
     self._estado_anterior = None
     self._acao_anterior = None
     self._acao_recompensada_anterior = None

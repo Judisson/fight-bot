@@ -111,6 +111,21 @@ def obter_acao_em_execucao():
     return _ACAO_EM_EXECUCAO
 
 
+def tem_acao_ativa():
+  with _LOCK_ESTADO_ACAO:
+    return _ACAO_EM_EXECUCAO != ACAO_ESPERAR or not _FILA_ACOES.empty()
+
+
+def obter_acao_ativa():
+  with _LOCK_ESTADO_ACAO:
+    if _ACAO_EM_EXECUCAO != ACAO_ESPERAR:
+      return _ACAO_EM_EXECUCAO
+    try:
+      return _FILA_ACOES.queue[0]
+    except IndexError:
+      return ACAO_ESPERAR
+
+
 def esquiva():
   pressionar(TECLA_ESQUIVA)
 

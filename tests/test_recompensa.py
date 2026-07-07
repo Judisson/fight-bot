@@ -248,9 +248,8 @@ class TestRecompensa(TestCase):
       nocaute_detectado=False,
       vitoria_detectada=False,
     )
-    from src.ai.recompensa import PESO_PUNICAO_DEFESA_SEM_ESPECIAL
-    self.assertAlmostEqual(recompensa_com_e0 - recompensa_sem_e0, PESO_PUNICAO_DEFESA_SEM_ESPECIAL, places=6)
-    self.assertTrue(info_com_e0["punicao_defesa_sem_especial"])
+    self.assertAlmostEqual(recompensa_com_e0, recompensa_sem_e0, places=6)
+    self.assertFalse(info_com_e0["punicao_defesa_sem_especial"])
     self.assertFalse(info_sem_e0["punicao_defesa_sem_especial"])
 
   def test_punicao_oponente_e3(self):
