@@ -37,4 +37,6 @@ Thumbs.db
 
 # Dados locais gerados em execucao
 data/memoria.json
-data/demonstrations
+data/
+.agents/
+.docs/
