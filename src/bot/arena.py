@@ -1,5 +1,6 @@
 import os
 import time
+import cv2
 
 from src.bot.acoes import clicar
 from src.bot.controle_fps import ControleFPS, obter_fps_alvo
@@ -7,6 +8,7 @@ from src.bot.captura import CapturaAssincrona
 from src.bot.foco import focar_jogo
 from src.bot.janela_jogo import encontrar_janela, obter_bbox_janela
 from src.bot.luta import Luta
+from src.bot.deteccao_luta import obter_estado_luta
 from src.bot.visao import encontrar_templates_em_paralelo
 from src.utils.log import log
 from src.utils.visao_debug import atualizar_metricas
@@ -35,7 +37,7 @@ def obter_monitor_jogo():
 
   if focar_jogo(TITULO_JOGO):
     log("Janela do jogo focada automaticamente.")
-    time.sleep(0.5)  # ? MUITO IMPORTANTE
+    time.sleep(0.5)
   else:
     log("Nao foi possivel focar automaticamente a janela.")
 
@@ -73,7 +75,7 @@ def iniciar_arena(monitor=None):
   log(f"Arena iniciada com FPS alvo: {fps_alvo}")
 
   exibir_debug = os.getenv("BOT_DEBUG", "1").strip() == "1"
-  luta = Luta(exibir_debug=exibir_debug, modo_treino="treino")
+  luta = Luta(exibir_debug=exibir_debug)
   capturador = CapturaAssincrona(monitor)
   capturador.iniciar()
 
@@ -87,12 +89,18 @@ def iniciar_arena(monitor=None):
           continue
 
         if processar_layout_arena(frame, monitor):
+          luta.resetar()
           continue
 
-        luta.processar_frame(frame)
+        # Só processa a luta se for identificado que o jogo está em combate
+        estado_luta = obter_estado_luta(frame)
+        if estado_luta["em_luta"] or estado_luta["nocaute"] or estado_luta["vitoria"]:
+          luta.processar_frame(frame)
+        else:
+          # Se não estiver em luta e não clicou em nada do menu, apenas mantém as janelas do OpenCV responsivas
+          cv2.waitKey(1)
       finally:
         controle_fps.finalizar_ciclo(inicio_ciclo)
         atualizar_metricas(controle_fps.obter_metricas())
   finally:
     capturador.parar()
-

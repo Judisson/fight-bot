@@ -8,6 +8,7 @@ pydirectinput.PAUSE = 0.0
 def pressionar(tecla):
 
   pydirectinput.keyDown(tecla)
+  time.sleep(0.05)
   pydirectinput.keyUp(tecla)
 
 

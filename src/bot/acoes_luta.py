@@ -2,15 +2,33 @@ import os
 import queue
 import threading
 
-from src.ai.acoes import (
-  ACAO_ATAQUE_LEVE,
-  ACAO_ATAQUE_MEDIO,
-  ACAO_ATAQUE_PESADO,
-  ACAO_BLOQUEIO,
-  ACAO_ESQUIVA,
-  ACAO_ESPERAR,
-  ACAO_ESPECIAL,
-)
+from src.utils.log import log
+
+ACAO_ESPERAR = 0
+ACAO_ESQUIVA = 1
+ACAO_BLOQUEIO = 2
+ACAO_ATAQUE_LEVE = 3
+ACAO_ATAQUE_MEDIO = 4
+ACAO_ATAQUE_PESADO = 5
+ACAO_ESPECIAL = 6
+ACAO_BLOQUEIO_3S = 7
+
+NOMES_ACAO = {
+  ACAO_ESPERAR: "esperar",
+  ACAO_ESQUIVA: "esquiva",
+  ACAO_BLOQUEIO: "bloqueio",
+  ACAO_ATAQUE_LEVE: "ataque_leve",
+  ACAO_ATAQUE_MEDIO: "ataque_medio",
+  ACAO_ATAQUE_PESADO: "ataque_pesado",
+  ACAO_ESPECIAL: "especial",
+  ACAO_BLOQUEIO_3S: "bloqueio_3s",
+}
+
+
+def nome_acao(acao):
+  return NOMES_ACAO.get(int(acao), f"acao_{acao}")
+
+
 from src.bot.teclado import pressionar, segurar
 
 
@@ -20,7 +38,7 @@ TECLA_ESPECIAL = os.getenv("BOT_TECLA_ESPECIAL", "s").strip() or "s"
 TECLA_ATAQUE_LEVE = os.getenv("BOT_TECLA_ATAQUE_LEVE", "j").strip() or "j"
 TECLA_ATAQUE_MEDIO = os.getenv("BOT_TECLA_ATAQUE_MEDIO", "k").strip() or "k"
 
-TEMPO_BLOQUEIO_DEFENSIVO = 0.180
+TEMPO_BLOQUEIO_DEFENSIVO = 0.800
 try:
   TEMPO_ATAQUE_PESADO = float(os.getenv("BOT_TEMPO_ATAQUE_PESADO", "0.25"))
 except ValueError:
@@ -84,6 +102,10 @@ def _executar_acao_sincrona(acao):
 
   if acao == ACAO_ESPECIAL:
     especial()
+    return
+
+  if acao == ACAO_BLOQUEIO_3S:
+    segurar(TECLA_BLOQUEIO, duracao=3.0)
     return
 
 

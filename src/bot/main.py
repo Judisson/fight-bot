@@ -3,8 +3,8 @@ import sys
 
 from src.bot.arena import iniciar_arena
 from src.bot.debug_simples import iniciar_debug_simples
-from src.bot.treino import iniciar_treino
-from src.bot.treino_observacao import iniciar_treino_observacao
+from src.bot.ajuste_luta import iniciar_ajuste_luta
+from src.bot.gravador_combo import iniciar_gravador_combo
 from src.calibracao.modo_calibracao import iniciar_calibracao
 from src.calibracao.modo_calibracao_roi import iniciar_calibracao_roi_jogar_novamente
 
@@ -15,24 +15,11 @@ OPCOES_FPS = [
 
 MODOS = [
   ("arena", "Fluxo completo da arena"),
-  ("treino", "Menu de treino"),
+  ("ajuste_luta", "Modo de ajuste de luta (Loop com rematch)"),
   ("debug", "Tela simples de debug com YOLO"),
-  ("calibracao", "Ajustar posicoes de vida e poder"),
+  ("gravador_combo", "Gravar combo do teclado (tempo real)"),
+  ("calibracao", "Ajustar posicoes do poder (especial)"),
   ("calibracao_roi", "Calibrar ROIs de templates"),
-]
-
-TIPO_TREINO = [
-  ("treino_normal", "Treino online IA Pixel + CNN + PPO"),
-  ("treino_observacao", "Treino de observacao (sem interferir)"),
-]
-
-FOCO_TREINO = [
-  ("completo", "Treino Completo (Melhorar todas as habilidades)"),
-  ("aparar", "Só Aparar (Focado em bloquear/aparar ataques inimigos)"),
-  ("defender", "Só Defender (Focado em sobrevivência: bloqueio e esquiva)"),
-  ("combo", "Só Combo (Focado em sequências ofensivas com resets de esquiva/bloqueio)"),
-  ("destreza", "Só Destreza (Focado em esquivar e dar destreza perfeita)"),
-  ("assistido", "Treino Assistido (Você joga e a IA imita e aprende com você)"),
 ]
 
 
@@ -153,33 +140,9 @@ def main() -> None:
         iniciar_arena()
         return
 
-      if modo == "treino":
-        while True:
-          tipo = escolher_com_setas(
-            "Escolha o tipo de treino:",
-            TIPO_TREINO,
-            permitir_voltar=True,
-          )
-          if tipo is None:
-            break
-            
-          foco = escolher_com_setas(
-            "Escolha o foco do treino:",
-            FOCO_TREINO,
-            permitir_voltar=True,
-          )
-          if foco is None:
-            continue
-            
-          limpar_tela()
-          print(f"Iniciando treino: {tipo} ({foco}) | FPS alvo: {fps_escolhido}")
-          print("")
-          if tipo == "treino_observacao":
-            iniciar_treino_observacao(modo_treino=foco)
-            return
-          iniciar_treino(modo_treino=foco)
-          return
-        continue
+      if modo == "ajuste_luta":
+        iniciar_ajuste_luta()
+        return
 
       if modo == "calibracao":
         iniciar_calibracao()
@@ -189,12 +152,13 @@ def main() -> None:
         iniciar_calibracao_roi_jogar_novamente()
         return
 
+      if modo == "gravador_combo":
+        iniciar_gravador_combo()
+        return
+
       if modo == "debug":
         iniciar_debug_simples()
         return
-
-      iniciar_treino(modo_treino="completo")
-      return
 
 
 if __name__ == "__main__":

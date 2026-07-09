@@ -3,8 +3,7 @@ from threading import Event
 from unittest import TestCase
 from unittest.mock import patch
 
-from src.ai.acoes import ACAO_BLOQUEIO, ACAO_ESQUIVA, ACAO_ESPERAR
-from src.bot.acoes_luta import executar_acao, obter_acao_em_execucao
+from src.bot.acoes_luta import ACAO_BLOQUEIO, ACAO_ESQUIVA, ACAO_ESPERAR, executar_acao, obter_acao_em_execucao
 
 
 class TestAcoesLuta(TestCase):
